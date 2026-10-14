@@ -1,0 +1,11 @@
+[package]
+name = "engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Ядро распознавания: буфер слова, защита токенов, скоринг, решения"
+
+[dependencies]
+layouts.workspace = true
+langmodel.workspace = true
+fst.workspace = true

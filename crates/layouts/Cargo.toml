@@ -1,0 +1,6 @@
+[package]
+name = "layouts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Физические раскладки: какой символ даёт клавиша в каждом языке"

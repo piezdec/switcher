@@ -1,0 +1,6 @@
+[package]
+name = "langmodel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Символьная языковая модель Kneser-Ney: обучение, формат, запросы"

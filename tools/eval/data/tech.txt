@@ -1,0 +1,134 @@
+git status
+git add -A
+git commit -m "fix typo in readme"
+git push origin main
+git pull --rebase
+git checkout -b feature/layout-switch
+git log --oneline --graph
+git diff HEAD~1
+git stash pop
+git rebase -i HEAD~3
+git cherry-pick abc123
+git remote -v
+git fetch --all --prune
+git reset --hard origin/main
+git branch -D old-branch
+git tag v1.2.0
+docker compose up -d
+docker ps -a
+docker build -t myapp .
+docker run --rm -it ubuntu bash
+docker exec -it postgres psql -U admin
+docker logs -f nginx
+kubectl get pods -n kube-system
+kubectl apply -f deployment.yaml
+kubectl describe svc frontend
+helm install redis bitnami/redis
+cargo build --release
+cargo test --workspace
+cargo clippy --all-targets
+cargo run -p switcher
+rustup update stable
+npm install
+npm run dev
+npm run build
+yarn add react
+pnpm install
+npx create-react-app myapp
+pip install requests
+python -m venv venv
+python manage.py migrate
+pytest -v tests
+ls -la
+cd ..
+mkdir -p src/utils
+rm -rf node_modules
+cp config.example.toml config.toml
+mv old.txt new.txt
+cat /etc/hosts
+grep -rn TODO src
+find . -name "*.rs"
+chmod +x run.sh
+sudo apt update
+sudo apt install build-essential
+ssh user@server.example.com
+scp file.txt user@host:/tmp
+curl -s https://api.github.com/repos
+wget https://example.com/file.zip
+tail -f /var/log/syslog
+ps aux
+kill -9 1234
+top
+htop
+echo $PATH
+export RUST_LOG=debug
+Get-ChildItem -Recurse
+Set-Location C:\Users
+Remove-Item -Force temp.txt
+Start-Process notepad
+winget install Git.Git
+ipconfig /all
+ping google.com
+nslookup example.com
+netstat -ano
+tasklist
+cd C:\Program Files
+notepad C:\Windows\System32\drivers\etc\hosts
+let mut buffer = Vec::new();
+fn main() {
+pub struct Config {
+impl Default for Engine {
+match result {
+Some(value) => value,
+None => return,
+use std::collections::HashMap;
+println!("hello world");
+if let Ok(file) = File::open(path) {
+for item in items.iter() {
+self.state.lock().unwrap();
+def parse_args():
+import numpy as np
+from typing import Optional
+return self.value
+print(f"result: {value}")
+class UserService:
+async def fetch_data(url):
+const app = express();
+function handleClick(event) {
+export default App;
+import React from 'react';
+console.log(error);
+document.getElementById('root')
+await fetch(url)
+SELECT id, name FROM users WHERE active = true;
+INSERT INTO orders (user_id, total) VALUES (1, 100);
+UPDATE users SET email = NULL;
+CREATE TABLE logs (id serial primary key);
+#include <stdio.h>
+int main(int argc, char** argv) {
+std::vector<int> numbers;
+public static void main(String[] args) {
+private final String name;
+server_name example.com;
+listen 443 ssl;
+max_connections = 100
+log_level = "info"
+timeout: 30s
+image: nginx:latest
+ports:
+version: "3.8"
+user_name
+max_value
+isEnabled
+getUserById
+HTTP API JSON XML SQL
+localhost:8080
+127.0.0.1
+http://localhost:3000/api/v1
+vim ~/.bashrc
+nano config.yaml
+code .
+npm audit fix
+tsc --noEmit
+eslint src --fix
+prettier --write .

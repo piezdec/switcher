@@ -1,0 +1,11 @@
+[package]
+name = "eval"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Проверка качества распознавания на корпусах"
+
+[dependencies]
+engine.workspace = true
+layouts.workspace = true

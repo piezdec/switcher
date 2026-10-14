@@ -1,0 +1,28 @@
+# Технические и повседневные слова, которых мало в субтитрах. Добавляются в английский словарь.
+the of and to a in is you that it he was for on are as with his they i at be this have from
+or one had by word but not what all were we when your can said there use an each which she
+do how their if will up other about out many then them these so some her would make like him
+into time has look two more write go see number no way could people my than first water been
+call who its now find long down day did get come made may part hello hi hey yes yeah ok okay
+thanks thank please sorry good bad new old big small just also very well here where why
+because don't can't i'm it's let's us our me am being does done having got went gone know
+think want need give tell work try ask feel leave put mean keep begin seem help show hear
+play run move live believe bring happen sit stand lose pay meet include continue set learn
+change lead understand watch follow stop create speak read spend grow open walk win offer
+remember love consider appear buy wait serve send expect build stay fall cut reach remain
+thing things something nothing anything everything someone anyone everyone right left next last
+great little own same few much most such only over after before back again still never always
+often sometimes today tomorrow yesterday week month year life world home house car phone
+computer internet email mail message chat file files folder text code project task error issue
+question answer name user users password login account settings setting button key keyboard
+layout language english russian test tests check fix bug feature version update release build
+git commit push pull merge rebase branch checkout status log diff clone init add reset stash
+tag fetch docker compose image container volume network npm yarn pnpm node cargo rust rustc
+python pip java javascript typescript golang sudo apt ls cd mkdir rm cp mv cat echo grep find
+sed awk curl wget ssh scp cmake src lib bin main fn mut pub mod impl struct enum trait const
+static return else while loop match true false null none self class def import print function
+var async await export default public private void int string bool char type interface package
+http https www com org net api json yaml toml xml html css sql select insert delete table index
+path config server client admin root dev prod debug kubectl helm terraform vim nvim windows
+linux mac powershell bash zsh shell value values data list map array object method field
+kbps kbit rtf ieee hdr vba dbf kext

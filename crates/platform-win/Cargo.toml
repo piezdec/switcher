@@ -1,0 +1,30 @@
+[package]
+name = "platform-win"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Windows-примитивы: хуки, SendInput, раскладки, значок в трее"
+
+[dependencies]
+layouts.workspace = true
+
+[dependencies.windows]
+workspace = true
+features = ["Win32_System_Com", "Win32_UI_Accessibility"]
+
+[dependencies.windows-sys]
+workspace = true
+features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Media_Audio",
+    "Win32_System_DataExchange",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+]

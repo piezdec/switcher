@@ -1,0 +1,16 @@
+[package]
+name = "platform-linux"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Linux-примитивы: evdev и uinput, Hyprland и KDE, трей, буфер, звуки"
+
+[dependencies]
+layouts.workspace = true
+
+
+[target.'cfg(target_os = "linux")'.dependencies]
+evdev = "0.13"
+zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
+ksni = { version = "0.3", default-features = false, features = ["blocking", "async-io"] }
+serde_json.workspace = true
