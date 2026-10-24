@@ -318,6 +318,39 @@ fn learns_from_manual_convert() {
 }
 
 #[test]
+fn learned_word_switches_without_space() {
+    // Pause вместо пробела (адресная строка): дважды перевели `фвы` → `ads` — дальше сразу.
+    let mut e = Engine::new();
+    for _ in 0..2 {
+        type_text(&mut e, "фвы", Lang::Ru);
+        assert_eq!(e.manual_convert(Some(Lang::Ru)).unwrap().text, "ads");
+        type_text(&mut e, " ", Lang::En);
+        e.reset();
+    }
+    let fixes = type_text(&mut e, "фвы", Lang::Ru);
+    assert_eq!(fixes.len(), 1);
+    let f = &fixes[0];
+    assert_eq!((f.erase, f.text.as_str(), f.switch_to), (2, "ads", Some(Lang::En)));
+    // Дописанное после переключения остаётся английским.
+    e.reset();
+    type_text(&mut e, "фвы", Lang::Ru);
+    let fixes = type_text(&mut e, "ense ", Lang::En);
+    assert!(fixes.iter().all(|f| f.switch_to != Some(Lang::Ru)), "{fixes:?}");
+}
+
+#[test]
+fn learned_word_waits_if_it_starts_a_real_word() {
+    // Выученное «ру» (клавиши `he`) — начало «hello»: посреди слова не трогаем.
+    let mut e = Engine::new();
+    e.learning.learn(&keys_of("he"), Lang::Ru, 10);
+    assert!(type_text(&mut e, "hello ", Lang::En).is_empty());
+    // Одиночную букву выученное тоже не переключает до конца слова.
+    let mut e = Engine::new();
+    e.learning.learn(&keys_of("f"), Lang::Ru, 10);
+    assert!(type_text(&mut e, "f", Lang::En).is_empty());
+}
+
+#[test]
 fn undo_of_auto_switch_is_remembered_at_once() {
     let mut e = late();
     assert_eq!(type_text(&mut e, "ghbdtn ", Lang::En).len(), 1);
@@ -463,4 +496,9 @@ fn single_letter_follows_the_phrase() {
     let fixes = type_text(&mut e, "b ", Lang::En);
     assert_eq!(fixes.len(), 1);
     assert_eq!(fixes[0].text, "и");
+}
+
+/// Клавиши английского слова — для прямой записи в обучение.
+fn keys_of(text: &str) -> Vec<Stroke> {
+    strokes(text, Lang::En).into_iter().map(|k| Stroke { vk: k.vk, shift: k.shift, caps: false }).collect()
 }

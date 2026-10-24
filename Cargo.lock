@@ -907,7 +907,7 @@ checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 
 [[package]]
 name = "engine"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "fst",
  "langmodel",
@@ -999,7 +999,7 @@ dependencies = [
 
 [[package]]
 name = "eval"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "engine",
  "layouts",
@@ -1565,11 +1565,11 @@ dependencies = [
 
 [[package]]
 name = "langmodel"
-version = "0.3.5"
+version = "0.3.6"
 
 [[package]]
 name = "layouts"
-version = "0.3.5"
+version = "0.3.6"
 
 [[package]]
 name = "libc"
@@ -2273,7 +2273,7 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
 name = "platform-linux"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "evdev",
  "ksni",
@@ -2284,7 +2284,7 @@ dependencies = [
 
 [[package]]
 name = "platform-win"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "layouts",
  "windows",
@@ -2779,7 +2779,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "switcher"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "eframe",
  "engine",
@@ -2991,7 +2991,7 @@ dependencies = [
 
 [[package]]
 name = "trainer"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "fst",
  "langmodel",

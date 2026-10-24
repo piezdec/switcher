@@ -191,6 +191,15 @@ pub fn decide_early(keys: &[Stroke], typed: Lang, ctx: &PhraseContext, p: &Param
     (delta >= p.margin + p.early_extra).then_some(other)
 }
 
+/// Можно ли перевести выученное слово посреди набора: в нём хотя бы две буквы и набранное
+/// не начинает частое слово своего языка («ру» — клавиши `he` — ждёт: вдруг это «hello»).
+pub fn learned_can_switch_early(keys: &[Stroke], typed: Lang) -> bool {
+    let typed_text = render_word(keys, typed).to_lowercase();
+    typed_text.chars().filter(|c| c.is_alphabetic()).count() >= 2
+        && !(typed_text.chars().all(char::is_alphabetic)
+            && lexicon::has_word_with_prefix(typed, &typed_text, EARLY_TYPED_CLASS))
+}
+
 /// Зоны доменов для раннего переключения. Без `.by`, `.kz`, `.su`: в русской раскладке
 /// это `юин`, `юля`, `юыг` — концы обычных слов («июля»).
 const WEB_ZONES: &[&str] = &["com", "ru", "org", "net", "io", "info", "dev", "ua"];

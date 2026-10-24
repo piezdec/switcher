@@ -201,7 +201,15 @@ impl Engine {
         if self.learning.keeps_prefix(&self.word, typed) {
             return None;
         }
-        let target = detect::decide_early(&self.word, typed, &self.context, &self.params)?;
+        // Выученное слово переводим, не дожидаясь пробела (адресная строка, поиск).
+        let learned = self
+            .learning
+            .preference(&self.word)
+            .filter(|&lang| lang != typed && detect::learned_can_switch_early(&self.word, typed));
+        let target = match learned {
+            Some(lang) => lang,
+            None => detect::decide_early(&self.word, typed, &self.context, &self.params)?,
+        };
         self.early_done = true;
         Some(Fix {
             erase: self.word.len() - 1,
