@@ -33,6 +33,18 @@ const GAME_DIRS: &[&str] = &[
     "/steamapps/common/", "/epic games/", "/gog galaxy/games/", "/gog games/",
     "/ubisoft game launcher/games/", "/ea games/", "/origin games/", "/riot games/",
     "/xboxgames/", "/itch/apps/",
+    // Battle.net ставит каждую игру в свою папку, общей нет.
+    "/world of warcraft/", "/overwatch/", "/diablo iv/", "/diablo iii/", "/diablo ii resurrected/",
+    "/hearthstone/", "/starcraft/", "/starcraft ii/", "/heroes of the storm/", "/warcraft iii/",
+    "/call of duty/",
+];
+
+/// Игры Battle.net по имени exe — если папку при установке выбрали другую.
+#[rustfmt::skip]
+const GAME_EXES: &[&str] = &[
+    "wow.exe", "wowclassic.exe", "overwatch.exe", "diablo iv.exe", "diablo iii.exe", "diablo iii64.exe",
+    "d2r.exe", "hearthstone.exe", "starcraft.exe", "sc2.exe", "sc2_x64.exe", "heroesofthestorm_x64.exe",
+    "warcraft iii.exe",
 ];
 
 /// Сами лаунчеры лежат рядом с играми, но в них печатают (поиск, чат) — это не игры.
@@ -41,10 +53,12 @@ const LAUNCHER_DIRS: &[&str] = &[
     "/epic games/launcher/", "/riot games/riot client/", "/ea desktop/",
 ];
 
-/// Игра по пути к её exe: установлена лаунчером (Steam, Epic, GOG, Ubisoft, EA, Riot, Xbox, itch).
+/// Игра по пути к её exe: установлена лаунчером (Steam, Epic, GOG, Ubisoft, EA, Riot, Xbox, itch, Battle.net).
 pub fn is_game_path(path: &str) -> bool {
     let p = path.to_lowercase().replace('\\', "/");
-    GAME_DIRS.iter().any(|d| p.contains(d)) && !LAUNCHER_DIRS.iter().any(|d| p.contains(d))
+    let exe = p.rsplit('/').next().unwrap_or(&p);
+    GAME_EXES.contains(&exe)
+        || GAME_DIRS.iter().any(|d| p.contains(d)) && !LAUNCHER_DIRS.iter().any(|d| p.contains(d))
 }
 
 /// Игра по классу окна в Linux: Steam через Proton (`steam_app_123`), gamescope.
@@ -74,6 +88,12 @@ mod tests {
         ));
         assert!(!is_game_path(r"C:\Riot Games\Riot Client\RiotClientServices.exe"));
         assert!(!is_game_path(r"C:\Program Files\Microsoft VS Code\Code.exe"));
+        // Battle.net: папка по умолчанию, своя папка; сам лаунчер — не игра.
+        assert!(is_game_path(r"C:\Program Files (x86)\World of Warcraft\_forever_\Wow.exe"));
+        assert!(is_game_path(r"C:\Program Files (x86)\Overwatch\_retail_\Overwatch.exe"));
+        assert!(is_game_path(r"D:\Games\WoW\_retail_\Wow.exe"));
+        assert!(!is_game_path(r"C:\Program Files (x86)\Battle.net\Battle.net.exe"));
+        assert!(!is_game_path(r"C:\Program Files (x86)\Battle.net\Battle.net Launcher.exe"));
     }
 
     #[test]

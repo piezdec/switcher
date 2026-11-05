@@ -188,7 +188,7 @@ impl Settings {
             .on_hover_text("Windows Terminal, PowerShell, VS Code, JetBrains IDE и другие — список на вкладке «Исключения».")
             .changed();
         changed |= ui
-            .checkbox(&mut cfg.pause_in_fullscreen, "Не работать в играх (на весь экран или из Steam, Epic, GOG и других лаунчеров)")
+            .checkbox(&mut cfg.pause_in_fullscreen, "Не работать в играх (на весь экран или из Steam, Epic, GOG, Battle.net и других лаунчеров)")
             .on_hover_text(
                 "Игру в окне Switcher узнаёт по папке, куда её поставил лаунчер. Любую другую можно исключить из меню значка.",
             )
