@@ -20,12 +20,13 @@ use platform_linux::desktop::Desktop;
 use platform_linux::input::{self, Grabbed, Mouse, Output, RawKeyEvent};
 use platform_linux::tray::{TrayCommand, TrayHandle, TrayView};
 use platform_linux::{keymap, misc};
+use std::collections::HashSet;
 use std::os::linux::net::SocketAddrExt;
 use std::os::unix::net::{SocketAddr, UnixListener};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const PERMISSIONS_HELP: &str = "\
@@ -39,6 +40,77 @@ const PERMISSIONS_HELP: &str = "\
 и перезайдите в систему (или перезагрузитесь).";
 
 /// Одна копия на пользователя: занятое абстрактное имя сокета освобождается само при выходе.
+/// Как часто искать новые и вернувшиеся клавиатуры.
+const KEYBOARD_SCAN: Duration = Duration::from_secs(3);
+
+/// Захваченные клавиатуры. Набор не постоянный: беспроводная клавиатура засыпает и возвращается
+/// уже другим узлом `/dev/input/event*`, новую могут подключить после запуска. Поэтому каждая
+/// клавиатура читается своим потоком, а сторож раз в несколько секунд подхватывает те,
+/// которых ещё нет в списке.
+#[derive(Clone)]
+struct Keyboards {
+    tx: mpsc::Sender<Msg>,
+    caps: Arc<AtomicBool>,
+    /// Устойчивые имена захваченных сейчас клавиатур (`input::identify`).
+    active: Arc<Mutex<HashSet<String>>>,
+}
+
+impl Keyboards {
+    /// Захватывает клавиатуры, которых ещё нет в списке; возвращает, сколько захвачено.
+    /// `first` — запуск программы: тогда о неудачах сообщаем (потом — молча пробуем снова).
+    fn grab_new(&self, first: bool) -> usize {
+        let mut grabbed = 0;
+        for (path, dev) in input::keyboards() {
+            let id = input::identify(&dev);
+            if self.active.lock().unwrap_or_else(|e| e.into_inner()).contains(&id) {
+                continue;
+            }
+            match Grabbed::grab(dev) {
+                Ok(kb) => {
+                    self.active.lock().unwrap_or_else(|e| e.into_inner()).insert(id.clone());
+                    if kb.caps() {
+                        self.caps.store(true, Ordering::Relaxed);
+                    }
+                    if !first {
+                        say!("подключена клавиатура: {}", id.split('|').next().unwrap_or("?"));
+                    }
+                    self.read(kb, id);
+                    grabbed += 1;
+                }
+                Err(e) if first => say!("не удалось захватить {} ({e})", path.display()),
+                Err(_) => {}
+            }
+        }
+        grabbed
+    }
+
+    /// Поток чтения одной клавиатуры. Когда она исчезает, освобождает её имя в списке.
+    fn read(&self, mut kb: Grabbed, id: String) {
+        let this = self.clone();
+        std::thread::spawn(move || {
+            while let Ok(events) = kb.read() {
+                this.caps.store(kb.caps(), Ordering::Relaxed);
+                for e in events {
+                    if this.tx.send(Msg::Key(e)).is_err() {
+                        return;
+                    }
+                }
+            }
+            say!("клавиатура отключилась: {}", id.split('|').next().unwrap_or("?"));
+            this.active.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+        });
+    }
+
+    /// Сторож: подхватывает клавиатуры, появившиеся после запуска или вернувшиеся из сна.
+    fn watch(&self) {
+        let this = self.clone();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(KEYBOARD_SCAN);
+            this.grab_new(false);
+        });
+    }
+}
+
 fn single_instance(name: &str) -> Option<UnixListener> {
     let addr = SocketAddr::from_abstract_name(format!("switcher-{name}-{}", user_id())).ok()?;
     UnixListener::bind_addr(&addr).ok()
@@ -94,25 +166,19 @@ pub fn run(after_update: bool) {
             return;
         }
     };
-    let mut keyboards = Vec::new();
-    for (path, dev) in input::keyboards() {
-        match Grabbed::grab(dev) {
-            Ok(g) => keyboards.push(g),
-            Err(e) => say!("не удалось захватить {} ({e})", path.display()),
-        }
-    }
-    if keyboards.is_empty() {
-        say!("не найдено ни одной клавиатуры.\n\n{PERMISSIONS_HELP}");
-        return;
-    }
-
     crate::update::spawn_auto();
 
     // Модели грузятся заранее: при первом нажатии на это нет времени.
     engine::warm_up();
 
-    let caps = Arc::new(AtomicBool::new(keyboards.iter().any(Grabbed::caps)));
+    let caps = Arc::new(AtomicBool::new(false));
     let (tx, rx) = mpsc::channel::<Msg>();
+    let keyboards = Keyboards { tx: tx.clone(), caps: caps.clone(), active: Arc::default() };
+    if keyboards.grab_new(true) == 0 {
+        // Не выходим: беспроводная клавиатура могла ещё не подключиться — сторож её подхватит.
+        say!("пока не найдено ни одной клавиатуры — жду подключения.\n\n{PERMISSIONS_HELP}");
+    }
+    keyboards.watch();
     // Окно настроек может попросить закрыться (перед перезапуском в новую версию) — через тот же
     // сокет, что охраняет единственный экземпляр.
     {
@@ -128,20 +194,6 @@ pub fn run(after_update: bool) {
         });
     }
 
-    for mut kb in keyboards {
-        let tx = tx.clone();
-        let caps = caps.clone();
-        std::thread::spawn(move || {
-            while let Ok(events) = kb.read() {
-                caps.store(kb.caps(), Ordering::Relaxed);
-                for e in events {
-                    if tx.send(Msg::Key(e)).is_err() {
-                        return;
-                    }
-                }
-            }
-        });
-    }
     for (_, dev) in input::mice() {
         let tx = tx.clone();
         std::thread::spawn(move || {

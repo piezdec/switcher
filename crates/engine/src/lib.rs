@@ -105,6 +105,8 @@ pub struct Engine {
     early_done: bool,
     /// В текущем слове был ручной перевод: язык и вес для обучения, учтётся на границе слова.
     manual: Option<(Lang, u8)>,
+    /// Текущее слово уже переводили вручную (хоть и вернули обратно): по паузе его не трогаем.
+    touched: bool,
     /// Автоматическое переключение. Ручной перевод работает всегда.
     pub auto: bool,
     /// Коэффициенты распознавания (порог и пр.); пресеты — [`Mode::params`].
@@ -126,6 +128,7 @@ impl Default for Engine {
             flag: false,
             early_done: false,
             manual: None,
+            touched: false,
             auto: true,
             params: Mode::Normal.params(),
             learning: Learning::default(),
@@ -221,8 +224,35 @@ impl Engine {
         })
     }
 
+    /// Пауза в наборе посреди слова: пробела может и не быть (адресная строка, поиск), поэтому
+    /// если слово уже сейчас переводилось бы на границе и в другой раскладке это словарное
+    /// слово — переводим. Не больше одного переключения за слово, как и раннее.
+    pub fn on_pause(&mut self, layout: Option<Lang>) -> Option<Fix> {
+        let typed = layout?;
+        if !self.auto || self.flag || self.early_done || self.touched {
+            return None;
+        }
+        if self.word.is_empty() || self.learning.keeps_prefix(&self.word, typed) {
+            return None;
+        }
+        let target = self.decide(&self.word, typed).switch_to?;
+        if !detect::can_switch_on_pause(&self.word, typed) {
+            return None;
+        }
+        self.early_done = true;
+        Some(Fix {
+            erase: self.word.len(),
+            text: render_word(&self.word, target),
+            tail: Tail::None,
+            switch_to: Some(target),
+            decision: None,
+            ..Fix::default()
+        })
+    }
+
     fn finish_word(&mut self, boundary: Stroke, layout: Option<Lang>) -> Option<Fix> {
         let early = std::mem::take(&mut self.early_done);
+        self.touched = false;
         let manual = self.manual.take();
         let sentence_start = std::mem::take(&mut self.sentence_start);
         if self.word.is_empty() {
@@ -338,6 +368,7 @@ impl Engine {
         if !self.word.is_empty() {
             let from = layout.unwrap_or_else(|| detect::likely_lang(&self.word).other());
             let to = from.other();
+            self.touched = true;
             // Отмена раннего переключения весит как отмена; повторный Pause гасит предыдущий.
             self.manual = match self.manual {
                 Some((lang, _)) if lang != to => None,
@@ -386,6 +417,7 @@ impl Engine {
         self.last = None;
         self.flag = false;
         self.early_done = false;
+        self.touched = false;
         self.manual = None;
     }
 

@@ -35,6 +35,17 @@ fn is_mouse(dev: &Device) -> bool {
     dev.supported_keys().is_some_and(|k| k.contains(KeyCode::BTN_LEFT))
 }
 
+/// Устойчивое имя устройства: название, физический путь и адрес. Узел `/dev/input/event*`
+/// после переподключения (сон Bluetooth-клавиатуры) меняется, а это — нет.
+pub fn identify(dev: &Device) -> String {
+    format!(
+        "{}|{}|{}",
+        dev.name().unwrap_or(""),
+        dev.physical_path().unwrap_or(""),
+        dev.unique_name().unwrap_or("")
+    )
+}
+
 /// Физические клавиатуры.
 pub fn keyboards() -> Vec<(PathBuf, Device)> {
     evdev::enumerate().filter(|(_, d)| is_keyboard(d)).collect()
@@ -165,5 +176,30 @@ impl Mouse {
                 return Ok(());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Нужен доступ к `/dev/uinput`: `cargo test -p platform-linux -- --ignored`.
+    #[test]
+    #[ignore]
+    fn virtual_keyboard_declares_numpad_and_media_keys() {
+        let _out = Output::create().expect("виртуальная клавиатура");
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let dev = evdev::enumerate()
+            .map(|(_, d)| d)
+            .find(|d| d.name() == Some(VIRTUAL_NAME))
+            .expect("виртуальная клавиатура видна системе");
+        let keys = dev.supported_keys().expect("клавиши");
+        // KP5, KP0, KP., громкость, обычная буква.
+        for code in [76, 82, 83, 115, keymap::KEY_A] {
+            assert!(keys.contains(KeyCode(code)), "код {code} не объявлен");
+        }
+        assert!(!keys.contains(KeyCode::BTN_LEFT));
+        // Саму себя клавиатурой для захвата не считаем.
+        assert!(!is_keyboard(&dev));
     }
 }

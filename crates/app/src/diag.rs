@@ -114,12 +114,13 @@ pub fn log_start(cfg: &crate::config::Config) {
     let exe = std::env::current_exe().map(|p| redact(&p.to_string_lossy())).unwrap_or_default();
     write(&format!("программа: {exe}; настройки: {}", redact(&crate::config::data_dir().to_string_lossy())));
     write(&format!(
-        "настройки: автопереключение {}, режим {:?}, осторожно в терминалах {}, пауза в играх {}, \
+        "настройки: автопереключение {}, режим {:?}, осторожно в терминалах {}, пауза в играх {}, перевод по паузе в наборе {}, \
          автообновление {}, исключения [{}]",
         on_off(cfg.auto),
         cfg.mode,
         on_off(cfg.careful_in_dev_tools),
         on_off(cfg.pause_in_fullscreen),
+        on_off(cfg.switch_on_pause),
         on_off(cfg.auto_update),
         cfg.excluded_apps.join(", ")
     ));

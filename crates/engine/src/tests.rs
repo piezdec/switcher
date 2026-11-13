@@ -339,6 +339,49 @@ fn learned_word_switches_without_space() {
 }
 
 #[test]
+fn pause_in_typing_switches_without_space() {
+    // Адресная строка: набрали `еуче`, остановились — это «text», пробела ждать не нужно.
+    let mut e = late();
+    assert!(type_text(&mut e, "еуче", Lang::Ru).is_empty());
+    let f = e.on_pause(Some(Lang::Ru)).expect("перевод по паузе");
+    assert_eq!((f.erase, f.text.as_str(), f.switch_to), (4, "text", Some(Lang::En)));
+    // Второй раз за слово не переводим; дописанное остаётся английским.
+    assert!(e.on_pause(Some(Lang::En)).is_none());
+    assert!(type_text(&mut e, "s ", Lang::En).is_empty());
+    // И в обратную сторону.
+    let mut e = late();
+    type_text(&mut e, "ghbdtn", Lang::En);
+    assert_eq!(e.on_pause(Some(Lang::En)).unwrap().text, "привет");
+}
+
+#[test]
+fn pause_in_typing_leaves_unfinished_words() {
+    // Задумались посреди настоящего слова — ничего не происходит.
+    for (text, lang) in [("рефе", Lang::Ru), ("hel", Lang::En), ("прив", Lang::Ru), ("the", Lang::En)]
+    {
+        let mut e = late();
+        type_text(&mut e, text, lang);
+        assert!(e.on_pause(Some(lang)).is_none(), "{text}");
+    }
+    // Короткое, не словарное в другой раскладке, пустое слово, выключенное автопереключение.
+    for text in ["gh", "zzqx", "git ", ""] {
+        let mut e = late();
+        type_text(&mut e, text, Lang::En);
+        assert!(e.on_pause(Some(Lang::En)).is_none(), "{text}");
+    }
+    let mut e = late();
+    e.auto = false;
+    type_text(&mut e, "ghbdtn", Lang::En);
+    assert!(e.on_pause(Some(Lang::En)).is_none());
+    // Ручной перевод в этом слове уже был — не спорим.
+    let mut e = late();
+    type_text(&mut e, "ghbdtn", Lang::En);
+    e.manual_convert(Some(Lang::En));
+    e.manual_convert(Some(Lang::Ru));
+    assert!(e.on_pause(Some(Lang::En)).is_none());
+}
+
+#[test]
 fn learned_word_waits_if_it_starts_a_real_word() {
     // Выученное «ру» (клавиши `he`) — начало «hello»: посреди слова не трогаем.
     let mut e = Engine::new();

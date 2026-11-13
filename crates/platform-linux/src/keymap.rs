@@ -38,9 +38,14 @@ pub fn code_of(vk: u16) -> Option<u16> {
     TABLE.iter().find(|(_, v)| *v == vk).map(|(c, _)| *c)
 }
 
-/// Все коды, которые умеет нажимать виртуальная клавиатура.
+/// Последний код обычных клавиш клавиатуры (`KEY_MICMUTE`); дальше идут кнопки мышей и геймпадов.
+const LAST_KEYBOARD_CODE: u16 = 248;
+
+/// Все коды, которые умеет нажимать виртуальная клавиатура: вся обычная клавиатура, а не только
+/// клавиши из `TABLE`. Ядро молча отбрасывает нажатия необъявленных клавиш, а мы пересылаем
+/// через себя всё — иначе пропадают цифровой блок, громкость и другие клавиши без VK.
 pub fn all_codes() -> impl Iterator<Item = u16> {
-    TABLE.iter().map(|(c, _)| *c)
+    1..=LAST_KEYBOARD_CODE
 }
 
 pub const KEY_LEFTSHIFT: u16 = 42;
@@ -63,6 +68,20 @@ mod tests {
         assert_eq!(code_of(0x51), Some(16));
         assert_eq!(code_of(0x0D), Some(KEY_ENTER));
         assert_eq!(vk_of(9999), 0xFF);
+    }
+
+    #[test]
+    fn keys_without_vk_are_still_forwarded() {
+        let codes: Vec<u16> = all_codes().collect();
+        // Всё из таблицы, цифровой блок (KP0–KP9, * + - . /) и громкость.
+        assert!(TABLE.iter().all(|(c, _)| codes.contains(c)));
+        for code in [82, 79, 80, 81, 75, 76, 77, 71, 72, 73, 55, 78, 74, 83, 98, 113, 114, 115] {
+            assert!(codes.contains(&code), "код {code} не объявлен");
+            // Для ядра распознавания это по-прежнему «не буква».
+        }
+        assert_eq!(vk_of(76), 0xFF); // KP5
+                                     // Кнопки мыши не объявляем: иначе система примет клавиатуру за мышь.
+        assert!(!codes.contains(&0x110));
     }
 
     #[test]

@@ -17,6 +17,9 @@ use std::time::{Duration, Instant};
 /// пока система не подтвердила его (консоли и Electron отвечают с задержкой).
 const ASSUMED_LAYOUT_TTL: Duration = Duration::from_millis(1000);
 
+/// Сколько человек должен не печатать посреди слова, чтобы перевести его без пробела.
+const TYPING_PAUSE: Duration = Duration::from_millis(600);
+
 /// Что сделать с выделенным текстом.
 #[derive(Clone, Copy, Debug)]
 pub enum SelectionMode {
@@ -189,6 +192,8 @@ pub struct Controller {
     game: bool,
     /// Пометка для плашки у курсора («выучено») и когда она появилась.
     note: Option<(&'static str, Instant)>,
+    /// Когда набрана последняя буква незаконченного слова (для перевода по паузе в наборе).
+    typing: Option<Instant>,
     /// Что последним записано в журнал о состоянии (пауза с причиной или работа).
     logged_state: Option<Option<String>>,
 }
@@ -219,6 +224,7 @@ impl Controller {
             hotkeys: Matcher::new(&config.hotkeys),
             snippets,
             note: None,
+            typing: None,
             logged_state: None,
             fullscreen: false,
             game: false,
@@ -349,6 +355,10 @@ impl Controller {
             self.sys.poke_password();
         }
 
+        // Любое нажатие отменяет ожидание паузы; буква незаконченного слова заведёт его заново.
+        if !ev.up {
+            self.typing = None;
+        }
         let m = self.mods.input(ev.vk);
         let hit = self.hotkeys.on_event(ev.vk, ev.up, m.ctrl, m.alt, m.shift, m.win);
         let blocked = self.sys.in_password() || self.excluded_now() || self.paused_for_fullscreen();
@@ -402,7 +412,35 @@ impl Controller {
                 self.enqueue(&mut q, fix);
                 Verdict::Swallow
             }
-            None => Verdict::Pass,
+            None => {
+                if classify(ev.vk, m.shift) == KeyClass::Word && !m.ctrl && !m.alt && !m.win {
+                    self.typing = Some(Instant::now());
+                }
+                Verdict::Pass
+            }
+        }
+    }
+
+    /// Человек остановился посреди слова: если оно явно в другой раскладке — переводим, не
+    /// дожидаясь пробела (в адресной строке и поиске пробела не будет).
+    fn switch_on_typing_pause(&mut self) {
+        if self.typing.is_none_or(|at| at.elapsed() < TYPING_PAUSE) {
+            return;
+        }
+        self.typing = None;
+        let blocked = self.sys.in_password() || self.excluded_now() || self.paused_for_fullscreen();
+        if blocked || !self.config.switch_on_pause {
+            return;
+        }
+        let shared = Arc::clone(&self.shared);
+        let mut q = shared.lock();
+        if q.pending {
+            return;
+        }
+        let layout = self.layout_now(false);
+        if let Some(fix) = self.engine.on_pause(layout) {
+            diag!("пауза в наборе — перевожу слово без пробела");
+            self.enqueue(&mut q, fix);
         }
     }
 
@@ -436,6 +474,7 @@ impl Controller {
     }
 
     pub fn on_click(&mut self) {
+        self.typing = None;
         self.engine.reset();
         self.sys.poke_password();
     }
@@ -446,6 +485,7 @@ impl Controller {
         self.fullscreen = self.sys.is_fullscreen();
         self.game = self.sys.is_game();
         self.assumed = None;
+        self.typing = None;
         self.engine.reset_context();
         self.exe = self.sys.foreground_app();
         let shell = self.sys.is_shell();
@@ -508,6 +548,7 @@ impl Controller {
             self.shared.push(Action::WriteFile { path: config::learned_path(), contents });
         }
         self.reload_changed_files();
+        self.switch_on_typing_pause();
         let observed = self.sys.foreground_lang();
         let lang = match self.assumed {
             Some((lang, at)) if observed != Some(lang) && at.elapsed() <= ASSUMED_LAYOUT_TTL => Some(lang),

@@ -200,6 +200,25 @@ pub fn learned_can_switch_early(keys: &[Stroke], typed: Lang) -> bool {
             && lexicon::has_word_with_prefix(typed, &typed_text, EARLY_TYPED_CLASS))
 }
 
+/// Минимум букв для перевода по паузе в наборе.
+const PAUSE_MIN_LETTERS: usize = 3;
+/// В другой раскладке должно получаться словарное слово хотя бы такой частоты.
+const PAUSE_OTHER_CLASS: u8 = 8;
+
+/// Можно ли перевести недописанное (возможно) слово по паузе в наборе. Строже, чем на границе
+/// слова: в другой раскладке — целое словарное слово, а набранное не начинает никакого слова
+/// своего языка (человек мог просто задуматься посреди «рефе…рата»).
+pub fn can_switch_on_pause(keys: &[Stroke], typed: Lang) -> bool {
+    let typed_text = render_word(keys, typed).to_lowercase();
+    let other = typed.other();
+    let other_text = render_word(keys, other).to_lowercase();
+    other_text.chars().count() >= PAUSE_MIN_LETTERS
+        && other_text.chars().all(char::is_alphabetic)
+        && lexicon::freq_class(other, &other_text).is_some_and(|c| c >= PAUSE_OTHER_CLASS)
+        && !(typed_text.chars().all(char::is_alphabetic)
+            && lexicon::has_word_with_prefix(typed, &typed_text, EARLY_TYPED_CLASS))
+}
+
 /// Зоны доменов для раннего переключения. Без `.by`, `.kz`, `.su`: в русской раскладке
 /// это `юин`, `юля`, `юыг` — концы обычных слов («июля»).
 const WEB_ZONES: &[&str] = &["com", "ru", "org", "net", "io", "info", "dev", "ua"];

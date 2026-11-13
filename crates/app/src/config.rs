@@ -86,6 +86,8 @@ pub struct Config {
     pub translit_style: TranslitStyle,
     /// Не работать, пока активная программа на весь экран (игры, видео).
     pub pause_in_fullscreen: bool,
+    /// Переводить слово без пробела, если человек остановился посреди набора.
+    pub switch_on_pause: bool,
     /// Проверять и ставить обновления с GitHub (единственное обращение в сеть).
     pub auto_update: bool,
     /// Горячие клавиши.
@@ -107,6 +109,7 @@ impl Default for Config {
             fix_typos: false,
             translit_style: TranslitStyle::Simple,
             pause_in_fullscreen: true,
+            switch_on_pause: true,
             auto_update: true,
             hotkeys: HotkeyConfig::default(),
         }
@@ -122,6 +125,7 @@ const CONFIG_HEADER: &str = "\
 # excluded_apps         — программы (имя exe), где переключатель ничего не делает
 # auto_update           — проверять и ставить обновления с GitHub (единственное обращение в сеть)
 # pause_in_fullscreen   — не работать в полноэкранных программах (игры, видео)
+# switch_on_pause       — переводить слово без пробела, если остановились посреди набора
 # indicator             — плашка с раскладкой у курсора при смене языка
 # switch_sound          — звук при смене раскладки
 # typing_click          — тихий щелчок клавиш при наборе по-русски

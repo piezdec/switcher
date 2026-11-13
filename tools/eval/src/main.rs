@@ -21,6 +21,7 @@ struct Options {
     limit: usize,
     examples: usize,
     sweep: bool,
+    pause: bool,
     explain: Vec<String>,
     params: Params,
     corpora: PathBuf,
@@ -32,6 +33,7 @@ fn parse_args() -> Options {
         limit: 2000,
         examples: 0,
         sweep: false,
+        pause: false,
         explain: Vec::new(),
         params: Params::default(),
         corpora: root.join("corpora"),
@@ -44,6 +46,10 @@ fn parse_args() -> Options {
         }
         if a == "--sweep" {
             o.sweep = true;
+            continue;
+        }
+        if a == "--pause" {
+            o.pause = true;
             continue;
         }
         let v = args.next().unwrap_or_else(|| panic!("{a}: нужно значение"));
@@ -229,6 +235,70 @@ fn run(sets: &[(Lang, Vec<String>)], tech: &[String], params: Params, keep: usiz
     r
 }
 
+/// Печатает первые `n` символов слова в раскладке `layout` пальцами, привыкшими к `intended`,
+/// и «делает паузу». `Some(true)` — пауза перевела слово, `Some(false)` — нет,
+/// `None` — слово перевелось ещё при наборе (это уже посчитано в основном отчёте).
+fn pause_after(word: &str, n: usize, intended: Lang, layout: Lang, params: Params) -> Option<bool> {
+    let mut e = Engine::new();
+    e.params = params;
+    for c in word.chars().take(n) {
+        let (vk, shift) = layouts::locate(c, intended)?;
+        if e.on_key(KeyInput { vk, shift, ..Default::default() }, Some(layout)).is_some() {
+            return None;
+        }
+    }
+    Some(e.on_pause(Some(layout)).is_some())
+}
+
+/// Перевод по паузе в наборе: худший случай — человек замирает после каждой буквы каждого слова.
+/// Ложные — слово в правильной раскладке перевелось на каком-то из своих начал; попадания —
+/// целое слово в неправильной раскладке перевелось по паузе, без пробела.
+fn pause_report(sets: &[(Lang, Vec<String>)], tech: &[String], params: Params, keep: usize) {
+    let tech_set = [(Lang::En, tech.to_vec())];
+    println!("{:<44} {:>8}  {:>8}  {:>8}", "перевод по паузе в наборе", "RU", "EN", "техника");
+    let mut fp = [Stat::default(), Stat::default(), Stat::default()];
+    let mut hit = [Stat::default(), Stat::default()];
+    for (i, (lang, sentences)) in sets.iter().chain(&tech_set).enumerate() {
+        let lang = *lang;
+        for w in sentences.iter().flat_map(|s| s.split_whitespace()) {
+            let len = w.chars().count();
+            let bad = (1..=len).find(|&n| pause_after(w, n, lang, lang, params) == Some(true));
+            fp[i].add(
+                1,
+                bad.is_some() as usize,
+                || format!("{w}: после «{}»", w.chars().take(bad.unwrap_or(0)).collect::<String>()),
+                keep,
+            );
+            if i < 2 {
+                // «Ошибка» здесь — слово, которому пауза не помогла (нужен пробел или Pause).
+                let helped = pause_after(w, len, lang, lang.other(), params) != Some(false);
+                hit[i].add(1, !helped as usize, || w.to_string(), 0);
+            }
+        }
+    }
+    println!(
+        "{:<44} {:>7.2}%  {:>7.2}%  {:>7.2}%",
+        "ложные: слово в правильной раскладке",
+        fp[0].rate(),
+        fp[1].rate(),
+        fp[2].rate()
+    );
+    println!(
+        "{:<44} {:>7.2}%  {:>7.2}%",
+        "переведено без пробела (неправ. раскладка)",
+        100.0 - hit[0].rate(),
+        100.0 - hit[1].rate()
+    );
+    for (name, s) in ["RU", "EN", "техника"].iter().zip(&fp) {
+        if !s.examples.is_empty() {
+            println!("\n## {name}: ложные по паузе");
+            for e in &s.examples {
+                println!("  {e}");
+            }
+        }
+    }
+}
+
 fn print_report(r: &Report, keep: usize) {
     let row = |name: &str, s: &[Stat; 2]| {
         println!("{name:<44} {:>7.2}%  {:>7.2}%", s[0].rate(), s[1].rate());
@@ -281,6 +351,10 @@ fn main() {
         .collect();
     engine::warm_up();
 
+    if o.pause {
+        pause_report(&sets, &tech, o.params, o.examples);
+        return;
+    }
     if o.sweep {
         println!(
             "{:>6} | {:>7} {:>7} | {:>7} {:>7} | {:>7} {:>7} | {:>6}",
