@@ -79,9 +79,9 @@ impl Tables {
                 put(c);
             }
         }
-        for n in 2..=self.order {
-            put(self.contexts[n].len() as u32);
-            for &(k, t, ty) in &self.contexts[n] {
+        for contexts in &self.contexts[2..=self.order] {
+            put(contexts.len() as u32);
+            for &(k, t, ty) in contexts {
                 put(k);
                 put(t);
                 put(ty);
@@ -127,13 +127,13 @@ impl Tables {
             }
             t.grams[n] = v;
         }
-        for n in 2..=order {
+        for contexts in &mut t.contexts[2..=order] {
             let count = next()? as usize;
             let mut v = Vec::with_capacity(count);
             for _ in 0..count {
                 v.push((next()?, next()?, next()?));
             }
-            t.contexts[n] = v;
+            *contexts = v;
         }
         Ok(t)
     }

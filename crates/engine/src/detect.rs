@@ -343,10 +343,7 @@ pub fn is_protected(text: &str) -> bool {
     // camelCase: строчная, за которой идёт заглавная. Заглавные Э Б Ю Х Ъ Ж Ё по краям —
     // это знаки другой раскладки (`"Literally"` = `ЭДшеукфдднЭ`), а не горб camelCase.
     let chars: Vec<char> = core.trim_matches(|c| "ЭБЮХЪЖЁ".contains(c)).chars().collect();
-    if chars.windows(2).any(|w| w[0].is_lowercase() && w[1].is_uppercase()) {
-        return true;
-    }
-    false
+    chars.windows(2).any(|w| w[0].is_lowercase() && w[1].is_uppercase())
 }
 
 fn is_cyrillic(c: char) -> bool {
