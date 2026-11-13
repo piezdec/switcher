@@ -33,18 +33,6 @@ const GAME_DIRS: &[&str] = &[
     "/steamapps/common/", "/epic games/", "/gog galaxy/games/", "/gog games/",
     "/ubisoft game launcher/games/", "/ea games/", "/origin games/", "/riot games/",
     "/xboxgames/", "/itch/apps/",
-    // Battle.net ставит каждую игру в свою папку, общей нет.
-    "/world of warcraft/", "/overwatch/", "/diablo iv/", "/diablo iii/", "/diablo ii resurrected/",
-    "/hearthstone/", "/starcraft/", "/starcraft ii/", "/heroes of the storm/", "/warcraft iii/",
-    "/call of duty/",
-];
-
-/// Игры Battle.net по имени exe — если папку при установке выбрали другую.
-#[rustfmt::skip]
-const GAME_EXES: &[&str] = &[
-    "wow.exe", "wowclassic.exe", "overwatch.exe", "diablo iv.exe", "diablo iii.exe", "diablo iii64.exe",
-    "d2r.exe", "hearthstone.exe", "starcraft.exe", "sc2.exe", "sc2_x64.exe", "heroesofthestorm_x64.exe",
-    "warcraft iii.exe",
 ];
 
 /// Сами лаунчеры лежат рядом с играми, но в них печатают (поиск, чат) — это не игры.
@@ -53,12 +41,31 @@ const LAUNCHER_DIRS: &[&str] = &[
     "/epic games/launcher/", "/riot games/riot client/", "/ea desktop/",
 ];
 
-/// Игра по пути к её exe: установлена лаунчером (Steam, Epic, GOG, Ubisoft, EA, Riot, Xbox, itch, Battle.net).
+/// Игра по пути к её exe: установлена лаунчером (Steam, Epic, GOG, Ubisoft, EA, Riot, Xbox, itch).
 pub fn is_game_path(path: &str) -> bool {
     let p = path.to_lowercase().replace('\\', "/");
-    let exe = p.rsplit('/').next().unwrap_or(&p);
-    GAME_EXES.contains(&exe)
-        || GAME_DIRS.iter().any(|d| p.contains(d)) && !LAUNCHER_DIRS.iter().any(|d| p.contains(d))
+    GAME_DIRS.iter().any(|d| p.contains(d)) && !LAUNCHER_DIRS.iter().any(|d| p.contains(d))
+}
+
+/// Служебные программы в папке игры Battle.net: в них печатают, это не игра.
+fn is_battle_net_helper(exe_name: &str) -> bool {
+    let name = exe_name.to_lowercase();
+    name.contains("launcher") || name.contains("error") || name.contains("crash")
+}
+
+/// Игра Battle.net: у него нет общей папки игр, зато в папке каждой игры лежит `.build.info`
+/// (сама игра — на уровень-два ниже: `World of Warcraft\_retail_\Wow.exe`).
+/// Смотрит на диск — звать при смене окна, не на каждое нажатие.
+pub fn is_battle_net_game(path: &str) -> bool {
+    let exe = std::path::Path::new(path);
+    let name = exe.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    !is_battle_net_helper(&name)
+        && exe.ancestors().skip(1).take(3).any(|dir| dir.join(".build.info").is_file())
+}
+
+/// Игра, установленная лаунчером: по общей папке лаунчера или по метке Battle.net.
+pub fn is_game(path: &str) -> bool {
+    is_game_path(path) || is_battle_net_game(path)
 }
 
 /// Игра по классу окна в Linux: Steam через Proton (`steam_app_123`), gamescope.
@@ -88,12 +95,29 @@ mod tests {
         ));
         assert!(!is_game_path(r"C:\Riot Games\Riot Client\RiotClientServices.exe"));
         assert!(!is_game_path(r"C:\Program Files\Microsoft VS Code\Code.exe"));
-        // Battle.net: папка по умолчанию, своя папка; сам лаунчер — не игра.
-        assert!(is_game_path(r"C:\Program Files (x86)\World of Warcraft\_forever_\Wow.exe"));
-        assert!(is_game_path(r"C:\Program Files (x86)\Overwatch\_retail_\Overwatch.exe"));
-        assert!(is_game_path(r"D:\Games\WoW\_retail_\Wow.exe"));
-        assert!(!is_game_path(r"C:\Program Files (x86)\Battle.net\Battle.net.exe"));
-        assert!(!is_game_path(r"C:\Program Files (x86)\Battle.net\Battle.net Launcher.exe"));
+        // Папка с «игровым» названием сама по себе ничего не значит.
+        assert!(!is_game_path(r"D:\Tools\Hearthstone\HearthstoneDeckTracker.exe"));
+    }
+
+    #[test]
+    fn battle_net_games_by_marker() {
+        // Любая папка, любое название: игру выдаёт `.build.info` в её корне.
+        let root = std::env::temp_dir().join(format!("switcher-bnet-test-{}", std::process::id()));
+        let game = root.join("Any Game").join("_retail_");
+        let plain = root.join("Tools").join("Wow");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::create_dir_all(&plain).unwrap();
+        std::fs::write(root.join("Any Game").join(".build.info"), b"").unwrap();
+        let p = |dir: &std::path::Path, exe: &str| dir.join(exe).to_string_lossy().into_owned();
+
+        assert!(is_battle_net_game(&p(&game, "Wow.exe")));
+        assert!(is_game(&p(&game, "Wow.exe")));
+        // Лаунчер игры и окно отчёта об ошибке — не игра.
+        assert!(!is_battle_net_game(&p(&root.join("Any Game"), "World of Warcraft Launcher.exe")));
+        assert!(!is_battle_net_game(&p(&game, "BlizzardError.exe")));
+        // Без метки — не игра, как бы ни назывался файл.
+        assert!(!is_battle_net_game(&p(&plain, "Wow.exe")));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

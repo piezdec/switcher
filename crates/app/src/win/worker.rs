@@ -127,7 +127,11 @@ fn convert_selection(mode: SelectionMode, layouts: &InstalledLayouts) {
         diag!("выделения нет — переводить нечего");
         return;
     }
-    let Some(text) = clipboard::get_text().filter(|t| !t.is_empty()) else { return };
+    let Some(text) = clipboard::get_text().filter(|t| !t.is_empty()) else {
+        // Выделен не текст (картинка, файл): переводить нечего, буфер возвращаем как был.
+        clipboard::set_text(saved.as_deref());
+        return;
+    };
 
     let cyrillic = text.chars().filter(|c| matches!(c, 'а'..='я' | 'А'..='Я' | 'ё' | 'Ё')).count();
     let latin = text.chars().filter(char::is_ascii_alphabetic).count();

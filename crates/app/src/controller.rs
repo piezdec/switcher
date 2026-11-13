@@ -413,6 +413,7 @@ impl Controller {
             Command::ConvertWord => {
                 let layout = self.layout_now(q.pending);
                 if let Some(fix) = self.engine.manual_convert(layout) {
+                    diag!("ручной перевод слова (горячая клавиша)");
                     self.enqueue(&mut q, fix);
                 }
             }
@@ -565,7 +566,7 @@ fn describe_fix(fix: &Fix) -> String {
     };
     let why = match &fix.decision {
         Some(d) => format!("{:?}", d.reason),
-        None => "вручную или посреди слова".to_string(),
+        None => "вручную или сам посреди слова".to_string(),
     };
     format!("исправление: {what}, причина {why}, стёрто {} симв.", fix.erase)
 }

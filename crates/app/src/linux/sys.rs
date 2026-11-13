@@ -49,7 +49,7 @@ impl Sys for LinuxSys {
         let pid = self.state.pid();
         pid != 0
             && std::fs::read_link(format!("/proc/{pid}/exe"))
-                .is_ok_and(|p| crate::profiles::is_game_path(&p.to_string_lossy()))
+                .is_ok_and(|p| crate::profiles::is_game(&p.to_string_lossy()))
     }
 
     fn is_shell(&self) -> bool {

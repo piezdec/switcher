@@ -90,7 +90,10 @@ pub fn foreground_is_fullscreen() -> bool {
             return false;
         }
         let m = mi.rcMonitor;
-        r.left <= m.left && r.top <= m.top && r.right >= m.right && r.bottom >= m.bottom
+        let covers = r.left <= m.left && r.top <= m.top && r.right >= m.right && r.bottom >= m.bottom;
+        // Переключатель окон (Alt+Tab) и «Представление задач» — окна Проводника на весь экран
+        // на долю секунды: это не игра, значок из-за них мигать не должен.
+        covers && foreground_exe().as_deref() != Some("explorer.exe")
     }
 }
 

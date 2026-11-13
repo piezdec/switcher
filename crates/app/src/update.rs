@@ -167,7 +167,12 @@ fn put_in_place(dir: &Path, data: &[u8]) -> Result<PathBuf, String> {
         let _ = std::fs::remove_file(&old);
         std::fs::rename(&target, &old).map_err(|e| format!("не отодвинуть старую версию: {e}"))?;
     }
-    std::fs::rename(&fresh, &target).map_err(|e| format!("не поставить новую версию: {e}"))?;
+    if let Err(e) = std::fs::rename(&fresh, &target) {
+        // Не оставляем человека без программы: возвращаем старую версию на место.
+        let _ = std::fs::rename(dir.join(format!("{EXE_NAME}.old")), &target);
+        let _ = std::fs::remove_file(&fresh);
+        return Err(format!("не поставить новую версию: {e}"));
+    }
     Ok(target)
 }
 
