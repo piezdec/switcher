@@ -10,7 +10,7 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, SetWindowsHookExW, UnhookWindowsHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT,
     LLKHF_EXTENDED, LLKHF_INJECTED, LLKHF_UP, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_MBUTTONDOWN,
-    WM_RBUTTONDOWN, WM_XBUTTONDOWN,
+    WM_MOUSEHWHEEL, WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_XBUTTONDOWN,
 };
 
 /// Событие клавиатуры в том виде, в каком его видит хук.
@@ -33,7 +33,8 @@ pub enum Verdict {
 }
 
 type KeyHandler = Box<dyn FnMut(&KeyEvent) -> Verdict>;
-type ClickHandler = Box<dyn FnMut()>;
+/// Мышь: `true` — щелчок (каретка могла переехать), `false` — колёсико.
+type ClickHandler = Box<dyn FnMut(bool)>;
 
 thread_local! {
     static KEY_HANDLER: RefCell<Option<KeyHandler>> = const { RefCell::new(None) };
@@ -50,7 +51,7 @@ impl Hooks {
     /// Ставит оба хука на текущий поток. Поток обязан крутить цикл сообщений.
     pub fn install(
         on_key: impl FnMut(&KeyEvent) -> Verdict + 'static,
-        on_click: impl FnMut() + 'static,
+        on_click: impl FnMut(bool) + 'static,
     ) -> std::io::Result<Hooks> {
         KEY_HANDLER.with(|h| *h.borrow_mut() = Some(Box::new(on_key)));
         CLICK_HANDLER.with(|h| *h.borrow_mut() = Some(Box::new(on_click)));
@@ -108,11 +109,12 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
 unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code == HC_ACTION as i32 {
         let msg = wparam as u32;
-        if matches!(msg, WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN) {
+        let click = matches!(msg, WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN);
+        if click || matches!(msg, WM_MOUSEWHEEL | WM_MOUSEHWHEEL) {
             CLICK_HANDLER.with(|h| {
                 if let Ok(mut slot) = h.try_borrow_mut() {
                     if let Some(f) = slot.as_mut() {
-                        f();
+                        f(click);
                     }
                 }
             });

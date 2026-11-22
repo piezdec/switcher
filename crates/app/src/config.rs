@@ -133,8 +133,9 @@ const CONFIG_HEADER: &str = "\
 # capitalize_sentences  — заглавная буква в начале предложения
 # fix_typos             — исправлять частые опечатки (собщение → сообщение)
 # translit_style        — транслитерация: simple (как в интернете) | passport (как в загранпаспорте)
-# [hotkeys]             — горячие клавиши: «Pause», «Shift+Pause», «Ctrl+Alt+Space», «DoubleShift»;
-#                         пустая строка — не назначено
+# [hotkeys]             — горячие клавиши: «Pause», «Shift+Pause», «Ctrl+Alt+Space», «DoubleShift»,
+#                         «LeftCtrl»/«RightCtrl»/«LeftShift»/«RightShift» (одно нажатие); пустая строка — не назначено
+#                         change_case — регистр слова или выделенного; layout_en, layout_ru — включить раскладку
 
 ";
 

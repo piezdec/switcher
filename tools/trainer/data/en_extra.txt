@@ -26,3 +26,8 @@ http https www com org net api json yaml toml xml html css sql select insert del
 path config server client admin root dev prod debug kubectl helm terraform vim nvim windows
 linux mac powershell bash zsh shell value values data list map array object method field
 kbps kbit rtf ieee hdr vba dbf kext
+# Современные названия и термины, которых нет в субтитрах 2018 года.
+github gitlab chatgpt openai midjourney llm tiktok figma trello jira canva yandex duckduckgo
+airpods xiaomi kubernetes nginx postgres postgresql mysql mongodb redis sqlite graphql nodejs
+nextjs fastapi vscode neovim jetbrains intellij pycharm webstorm nvme ethereum metaverse covid
+coronavirus deepfake chatbot ntfy

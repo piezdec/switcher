@@ -9,6 +9,7 @@ pub mod keys;
 pub mod learning;
 mod lexicon;
 pub mod score;
+pub mod selection;
 pub mod text;
 pub mod translit;
 
@@ -401,6 +402,25 @@ impl Engine {
         Some(Fix { erase: last.keys.len() + 1, text, switch_to: Some(to), ..Fix::default() })
     }
 
+    /// Смена регистра текущего или последнего слова (по кругу, см. [`text::cycle_case`]).
+    /// `None` — слова у каретки нет: тогда платформа меняет регистр выделенного.
+    pub fn cycle_case(&mut self, layout: Option<Lang>) -> Option<Fix> {
+        if !self.word.is_empty() {
+            let lang = layout.unwrap_or_else(|| detect::likely_lang(&self.word).other());
+            let text = text::cycle_case(&render_word(&self.word, lang));
+            set_case(&mut self.word, &text, lang);
+            return Some(Fix { erase: self.word.len(), text, ..Fix::default() });
+        }
+        let last = self.last.as_mut()?;
+        if last.boundary.vk == VK_RETURN {
+            return None;
+        }
+        let mut text = text::cycle_case(&render_word(&last.keys, last.lang));
+        set_case(&mut last.keys, &text, last.lang);
+        text.push(last.boundary.render(last.lang)?);
+        Some(Fix { erase: last.keys.len() + 1, text, ..Fix::default() })
+    }
+
     fn backspace(&mut self) {
         if self.word.pop().is_none() {
             // Стёрли границу — продолжаем редактировать предыдущее слово.
@@ -430,6 +450,17 @@ impl Engine {
     /// Текущее недописанное слово.
     pub fn current_word(&self) -> &[Stroke] {
         &self.word
+    }
+}
+
+/// Подгоняет Shift у букв слова под новый регистр, чтобы Pause и следующая смена регистра
+/// видели слово таким, каким оно стало на экране.
+fn set_case(keys: &mut [Stroke], text: &str, lang: Lang) {
+    for (k, c) in keys.iter_mut().zip(text.chars()) {
+        if k.render(lang).is_some_and(char::is_alphabetic) {
+            k.shift = c.is_uppercase();
+            k.caps = false;
+        }
     }
 }
 

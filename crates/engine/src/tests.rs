@@ -545,3 +545,24 @@ fn single_letter_follows_the_phrase() {
 fn keys_of(text: &str) -> Vec<Stroke> {
     strokes(text, Lang::En).into_iter().map(|k| Stroke { vk: k.vk, shift: k.shift, caps: false }).collect()
 }
+
+#[test]
+fn case_hotkey_cycles_last_word() {
+    let mut e = late();
+    type_text(&mut e, "привет ", Lang::Ru);
+    let texts: Vec<String> = (0..3).map(|_| e.cycle_case(Some(Lang::Ru)).unwrap().text).collect();
+    assert_eq!(texts, ["Привет ", "ПРИВЕТ ", "привет "]);
+    assert_eq!(e.cycle_case(Some(Lang::Ru)).unwrap().erase, 7);
+    // После смены регистра Pause переводит слово уже в новом регистре.
+    assert_eq!(e.manual_convert(Some(Lang::Ru)).unwrap().text, "Ghbdtn ");
+}
+
+#[test]
+fn case_hotkey_on_current_word_and_without_word() {
+    let mut e = late();
+    type_text(&mut e, "hello", Lang::En);
+    let fix = e.cycle_case(Some(Lang::En)).unwrap();
+    assert_eq!((fix.erase, fix.text.as_str(), fix.switch_to), (5, "Hello", None));
+    e.reset();
+    assert!(e.cycle_case(Some(Lang::En)).is_none(), "слова нет — меняется регистр выделенного");
+}

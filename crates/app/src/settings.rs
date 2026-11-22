@@ -30,11 +30,27 @@ enum HotkeySlot {
     ConvertSelection,
     Transliterate,
     ToggleAuto,
+    ChangeCase,
+    LayoutEn,
+    LayoutRu,
 }
 
 impl HotkeySlot {
+    /// Готовые варианты в списке.
+    fn presets(self) -> &'static [&'static str] {
+        match self {
+            HotkeySlot::LayoutEn => &["LeftCtrl", "LeftShift"],
+            HotkeySlot::LayoutRu => &["RightCtrl", "RightShift"],
+            HotkeySlot::ChangeCase => &["Ctrl+Pause", "Ctrl+Shift+Pause", "ScrollLock", "DoubleShift"],
+            _ => &["Pause", "Shift+Pause", "Ctrl+Pause", "DoubleShift", "DoubleCtrl", "ScrollLock"],
+        }
+    }
+
     fn get(self, cfg: &mut Config) -> &mut String {
         match self {
+            HotkeySlot::ChangeCase => &mut cfg.hotkeys.change_case,
+            HotkeySlot::LayoutEn => &mut cfg.hotkeys.layout_en,
+            HotkeySlot::LayoutRu => &mut cfg.hotkeys.layout_ru,
             HotkeySlot::ConvertWord => &mut cfg.hotkeys.convert_word,
             HotkeySlot::ConvertSelection => &mut cfg.hotkeys.convert_selection,
             HotkeySlot::ToggleAuto => &mut cfg.hotkeys.toggle_auto,
@@ -86,6 +102,17 @@ pub fn run(tab: Option<&str>) -> eframe::Result<()> {
 }
 
 /// Оранжевый квадрат, как значок в трее.
+/// Название горячей клавиши для людей: `RightCtrl` → «Правый Ctrl».
+fn pretty(hotkey: &str) -> String {
+    match hotkey {
+        "LeftCtrl" => "Левый Ctrl".into(),
+        "RightCtrl" => "Правый Ctrl".into(),
+        "LeftShift" => "Левый Shift".into(),
+        "RightShift" => "Правый Shift".into(),
+        other => other.into(),
+    }
+}
+
 fn window_icon() -> egui::IconData {
     let size = 32;
     let rgba = (0..size * size).flat_map(|_| [0xF2, 0x8C, 0x28, 0xFF]).collect();
@@ -311,6 +338,9 @@ impl Settings {
                 (HotkeySlot::ConvertSelection, "Перевести выделенный текст"),
                 (HotkeySlot::Transliterate, "Транслитерировать выделенное"),
                 (HotkeySlot::ToggleAuto, "Включить / выключить"),
+                (HotkeySlot::ChangeCase, "Сменить регистр слова или выделенного"),
+                (HotkeySlot::LayoutEn, "Включить английскую раскладку"),
+                (HotkeySlot::LayoutRu, "Включить русскую раскладку"),
             ] {
                 ui.label(title);
                 if self.recording == Some(slot) {
@@ -330,12 +360,10 @@ impl Settings {
                 let mut cfg = self.config.clone();
                 let current = slot.get(&mut cfg).clone();
                 let shown =
-                    if current.is_empty() { "не назначено".to_string() } else { current.clone() };
+                    if current.is_empty() { "не назначено".to_string() } else { pretty(&current) };
                 egui::ComboBox::from_id_salt(title).width(200.0).selected_text(shown).show_ui(ui, |ui| {
-                    for preset in
-                        ["Pause", "Shift+Pause", "Ctrl+Pause", "DoubleShift", "DoubleCtrl", "ScrollLock"]
-                    {
-                        if ui.selectable_label(current == preset, preset).clicked() {
+                    for &preset in slot.presets() {
+                        if ui.selectable_label(current == preset, pretty(preset)).clicked() {
                             self.save_config(|c| *slot.get(c) = preset.to_string());
                         }
                     }
@@ -354,6 +382,18 @@ impl Settings {
         ui.add_space(10.0);
         ui.label(
             egui::RichText::new("DoubleShift — два быстрых нажатия Shift подряд, без других клавиш.").weak(),
+        );
+        ui.label(
+            egui::RichText::new(
+                "«Левый Ctrl», «Правый Ctrl» — одно короткое нажатие клавиши, без других клавиш.                  Сочетания с Ctrl работают как обычно.",
+            )
+            .weak(),
+        );
+        ui.label(
+            egui::RichText::new(
+                "Регистр меняется по кругу: нижний → Как в предложении → ВЕРХНИЙ.                  Сразу после набора — у последнего слова, иначе — у выделенного текста.",
+            )
+            .weak(),
         );
     }
 

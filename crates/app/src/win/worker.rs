@@ -4,7 +4,7 @@
 
 use crate::config;
 use crate::controller::{Action, SelectionMode, Shared};
-use engine::{translit, Fix, Lang, Tail};
+use engine::{selection, text, translit, Fix, Tail};
 use platform_win::hook::KeyEvent as HookEvent;
 use platform_win::layout::InstalledLayouts;
 use platform_win::{clipboard, input};
@@ -50,6 +50,11 @@ fn run(shared: &Shared, layouts: InstalledLayouts) {
                 });
             }
             Action::Selection(mode) => convert_selection(mode, &layouts),
+            Action::SwitchLayout(lang) => {
+                if !layouts.request_switch(lang) {
+                    diag!("ОШИБКА: не удалось переключить раскладку на {lang}");
+                }
+            }
             Action::WriteFile { path, contents } => {
                 if let Err(e) = config::write_file(&path, &contents) {
                     diag!("ОШИБКА: не удалось записать {}: {e}", path.display());
@@ -115,7 +120,15 @@ fn convert_selection(mode: SelectionMode, layouts: &InstalledLayouts) {
         thread::sleep(Duration::from_millis(10));
     }
 
-    let saved = clipboard::get_text();
+    // Буфер обмена — во всех форматах (картинки, файлы, оформление), чтобы вернуть его как был.
+    let saved = clipboard::snapshot();
+    let restore = || {
+        if let Some(saved) = &saved {
+            if !clipboard::restore(saved) {
+                diag!("ОШИБКА: не удалось вернуть буфер обмена целиком");
+            }
+        }
+    };
     let before = clipboard::sequence_number();
     // Ctrl+Insert, а не Ctrl+C: в терминале Ctrl+C без выделения прервёт программу.
     input::chord(&[VK_CONTROL], VK_INSERT, true);
@@ -129,23 +142,24 @@ fn convert_selection(mode: SelectionMode, layouts: &InstalledLayouts) {
     }
     let Some(text) = clipboard::get_text().filter(|t| !t.is_empty()) else {
         // Выделен не текст (картинка, файл): переводить нечего, буфер возвращаем как был.
-        clipboard::set_text(saved.as_deref());
+        restore();
         return;
     };
 
-    let cyrillic = text.chars().filter(|c| matches!(c, 'а'..='я' | 'А'..='Я' | 'ё' | 'Ё')).count();
-    let latin = text.chars().filter(char::is_ascii_alphabetic).count();
     let converted = match mode {
         SelectionMode::Layout => {
-            // Направление — по преобладающим буквам; раскладку переключаем туда же.
-            let (from, to) = if cyrillic > latin { (Lang::Ru, Lang::En) } else { (Lang::En, Lang::Ru) };
-            layouts.request_switch(to);
-            layouts::convert_str(&text, from, to)
+            // Переводятся только слова не в той раскладке; раскладку — туда, куда переводили.
+            let (converted, switch_to) = selection::convert(&text);
+            if let Some(to) = switch_to {
+                layouts.request_switch(to);
+            }
+            converted
         }
         SelectionMode::Translit(style) => translit::transliterate(&text, style),
+        SelectionMode::Case => text::cycle_case(&text),
     };
 
     // Печатаем, а не вставляем: буфер обмена можно вернуть сразу.
     input::type_text(&converted);
-    clipboard::set_text(saved.as_deref());
+    restore();
 }

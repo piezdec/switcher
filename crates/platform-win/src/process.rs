@@ -124,3 +124,70 @@ pub fn foreground_is_shell() -> bool {
     SHELL_CLASSES.contains(&class.as_str())
         || foreground_exe().is_some_and(|e| SHELL_HOSTS.contains(&e.as_str()))
 }
+
+/// Активное окно запущено с бо́льшими правами, чем мы (от имени администратора): Windows не
+/// пускает в такие окна наш ввод, а хук не видит их нажатий. Если узнать не удалось — `false`.
+pub fn foreground_above_us() -> bool {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_null() {
+            return false;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process.is_null() {
+            return false;
+        }
+        let theirs = integrity_level(process);
+        CloseHandle(process);
+        let ours = integrity_level(windows_sys::Win32::System::Threading::GetCurrentProcess());
+        matches!((theirs, ours), (Some(t), Some(o)) if t > o)
+    }
+}
+
+/// Уровень целостности процесса: 0x2000 — обычный, 0x3000 — администратор, 0x4000 — система.
+unsafe fn integrity_level(process: windows_sys::Win32::Foundation::HANDLE) -> Option<u32> {
+    use windows_sys::Win32::Security::{
+        GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TokenIntegrityLevel,
+        TOKEN_MANDATORY_LABEL, TOKEN_QUERY,
+    };
+    use windows_sys::Win32::System::Threading::OpenProcessToken;
+
+    let mut token = std::ptr::null_mut();
+    if OpenProcessToken(process, TOKEN_QUERY, &mut token) == 0 {
+        return None;
+    }
+    // Метка с SID внутри: 64 байт с запасом хватает.
+    let mut buf = [0u64; 16];
+    let mut len = 0u32;
+    let ok = GetTokenInformation(
+        token,
+        TokenIntegrityLevel,
+        buf.as_mut_ptr().cast(),
+        std::mem::size_of_val(&buf) as u32,
+        &mut len,
+    );
+    CloseHandle(token);
+    if ok == 0 {
+        return None;
+    }
+    let label = &*(buf.as_ptr() as *const TOKEN_MANDATORY_LABEL);
+    let sid = label.Label.Sid;
+    let count = *GetSidSubAuthorityCount(sid);
+    if count == 0 {
+        return None;
+    }
+    Some(*GetSidSubAuthority(sid, u32::from(count) - 1))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn own_integrity_level_is_known() {
+        let own = unsafe {
+            super::integrity_level(windows_sys::Win32::System::Threading::GetCurrentProcess())
+        };
+        assert!(own.is_some_and(|l| l >= 0x2000), "{own:?}");
+    }
+}

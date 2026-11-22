@@ -51,6 +51,10 @@ impl Sys for WinSys {
         process::foreground_exe_path().is_some_and(|p| crate::profiles::is_game(&p))
     }
 
+    fn is_above_us(&self) -> bool {
+        process::foreground_above_us()
+    }
+
     fn is_shell(&self) -> bool {
         process::foreground_is_shell()
     }

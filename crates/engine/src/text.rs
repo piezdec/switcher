@@ -75,6 +75,45 @@ pub fn capitalize(text: &str) -> Option<String> {
     Some(first.to_uppercase().chain(chars).collect())
 }
 
+/// Смена регистра по горячей клавише, по кругу: нижний → «Как в предложении» → ВЕРХНИЙ → нижний.
+/// Смешанный регистр (`пРИВЕТ`) сначала становится нижним.
+pub fn cycle_case(text: &str) -> String {
+    let lower = text.to_lowercase();
+    let upper = text.to_uppercase();
+    let sentence = sentence_case(&lower);
+    if text == lower && sentence != lower {
+        sentence
+    } else if text == sentence && sentence != upper {
+        upper
+    } else {
+        lower
+    }
+}
+
+/// Заглавная в начале текста и после `.`, `!`, `?` с пробелом.
+fn sentence_case(lower: &str) -> String {
+    let mut out = String::with_capacity(lower.len());
+    let mut start = true;
+    let mut after_end = false;
+    for c in lower.chars() {
+        if start && c.is_alphabetic() {
+            out.extend(c.to_uppercase());
+            start = false;
+            continue;
+        }
+        out.push(c);
+        if matches!(c, '.' | '!' | '?') {
+            after_end = true;
+        } else if after_end && c.is_whitespace() {
+            start = true;
+            after_end = false;
+        } else if !c.is_whitespace() {
+            after_end = false;
+        }
+    }
+    out
+}
+
 const TYPOS: &str = include_str!("../data/typos.txt");
 
 fn typos() -> &'static HashMap<String, String> {
@@ -129,6 +168,19 @@ mod tests {
         assert_eq!(fix_case(&k, "пРИВЕТ"), Some(("Привет".into(), true)));
         // Просто набранное капсом слово без Shift — не трогаем.
         assert_eq!(fix_case(&keys("привет", true), "ПРИВЕТ"), None);
+    }
+
+    #[test]
+    fn case_cycles() {
+        assert_eq!(cycle_case("привет"), "Привет");
+        assert_eq!(cycle_case("Привет"), "ПРИВЕТ");
+        assert_eq!(cycle_case("ПРИВЕТ"), "привет");
+        assert_eq!(cycle_case("пРИВЕТ"), "привет");
+        assert_eq!(cycle_case("как дела. всё хорошо"), "Как дела. Всё хорошо");
+        assert_eq!(cycle_case("Как Дела"), "как дела");
+        assert_eq!(cycle_case("a"), "A");
+        assert_eq!(cycle_case("A"), "a");
+        assert_eq!(cycle_case("123"), "123");
     }
 
     #[test]

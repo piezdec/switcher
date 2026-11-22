@@ -6,7 +6,7 @@
 
 use crate::config;
 use crate::controller::{Action, SelectionMode, Shared};
-use engine::{translit, Fix, Lang, Tail};
+use engine::{selection, translit, Fix, Lang, Tail};
 use platform_linux::desktop::Desktop;
 use platform_linux::input::{Output, RawKeyEvent};
 use platform_linux::{keymap, misc};
@@ -54,6 +54,11 @@ fn run(shared: &Shared, w: &Worker) {
                 w.out.forward(RawKeyEvent { code: ev.raw.code, value });
             }
             Action::Selection(mode) => w.convert_selection(mode),
+            Action::SwitchLayout(lang) => {
+                if !w.desktop.switch(lang) {
+                    say!("ОШИБКА: не удалось переключить раскладку на {lang}");
+                }
+            }
             Action::WriteFile { path, contents } => {
                 if let Err(e) = config::write_file(&path, &contents) {
                     say!("ОШИБКА: не удалось записать {}: {e}", path.display());
@@ -152,15 +157,17 @@ impl Worker {
             say!("выделения нет (или не установлен wl-clipboard)");
             return;
         };
-        let cyrillic = text.chars().filter(|c| matches!(c, 'а'..='я' | 'А'..='Я' | 'ё' | 'Ё')).count();
-        let latin = text.chars().filter(char::is_ascii_alphabetic).count();
         let converted = match mode {
             SelectionMode::Layout => {
-                let (from, to) = if cyrillic > latin { (Lang::Ru, Lang::En) } else { (Lang::En, Lang::Ru) };
-                self.desktop.switch(to);
-                layouts::convert_str(&text, from, to)
+                // Переводятся только слова не в той раскладке; раскладка — туда, куда переводили.
+                let (converted, switch_to) = selection::convert(&text);
+                if let Some(to) = switch_to {
+                    self.desktop.switch(to);
+                }
+                converted
             }
             SelectionMode::Translit(style) => translit::transliterate(&text, style),
+            SelectionMode::Case => engine::text::cycle_case(&text),
         };
         self.type_text(&converted);
     }

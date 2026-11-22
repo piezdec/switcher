@@ -27,6 +27,8 @@ pub enum SelectionMode {
     Layout,
     /// Транслитерировать: «Привет» ⇄ «Privet».
     Translit(Style),
+    /// Сменить регистр: ВЕРХНИЙ → нижний → Как в предложении.
+    Case,
 }
 
 pub enum Action {
@@ -35,6 +37,8 @@ pub enum Action {
     Replay(KeyEvent),
     /// Перевести (или транслитерировать) выделенный текст через буфер обмена.
     Selection(SelectionMode),
+    /// Включить раскладку (горячая клавиша «английская» / «русская»).
+    SwitchLayout(Lang),
     /// Записать файл (настройки, выученные слова) — диск не для потока хука.
     WriteFile {
         path: PathBuf,
@@ -190,6 +194,8 @@ pub struct Controller {
     fullscreen: bool,
     /// Активное окно — игра из лаунчера (по пути к exe) — при смене окна.
     game: bool,
+    /// Активное окно запущено от имени администратора, а мы — нет: работать там не можем.
+    above_us: bool,
     /// Пометка для плашки у курсора («выучено») и когда она появилась.
     note: Option<(&'static str, Instant)>,
     /// Когда набрана последняя буква незаконченного слова (для перевода по паузе в наборе).
@@ -228,6 +234,7 @@ impl Controller {
             logged_state: None,
             fullscreen: false,
             game: false,
+            above_us: false,
             files: Files {
                 config: WatchedFile::new(&config::config_path()),
                 learned: WatchedFile::new(&config::learned_path()),
@@ -341,9 +348,19 @@ impl Controller {
         self.config.pause_in_fullscreen && (self.fullscreen || self.game)
     }
 
+    /// Активное окно запущено от имени администратора, а мы — нет (для подсказки у значка).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn admin_window(&self) -> bool {
+        self.above_us
+    }
+
     /// Активно ли переключение в текущем окне (для значка).
     pub fn active_here(&self) -> bool {
-        self.config.auto && !self.excluded_now() && !self.sys.in_password() && !self.paused_for_fullscreen()
+        self.config.auto
+            && !self.excluded_now()
+            && !self.sys.in_password()
+            && !self.paused_for_fullscreen()
+            && !self.above_us
     }
 
     /// Обработчик хука клавиатуры.
@@ -365,9 +382,14 @@ impl Controller {
         match hit {
             Hit::SwallowUp => return Verdict::Swallow,
             Hit::Command { command, swallow } => {
-                // Включать и выключать можно везде; переводить — только там, где мы работаем.
+                // Включать и выключать можно везде, раскладку менять — везде, кроме игр
+                // (там Ctrl — это присесть); переводить — только там, где мы работаем.
                 if command == Command::ToggleAuto {
                     self.update_config(|cfg| cfg.auto = !cfg.auto);
+                } else if let Command::Layout(lang) = command {
+                    if !self.paused_for_fullscreen() {
+                        self.switch_layout(lang);
+                    }
                 } else if !blocked {
                     self.run_command(command);
                 }
@@ -469,11 +491,35 @@ impl Controller {
                     .push_back(Action::Selection(SelectionMode::Translit(self.config.translit_style.into())));
                 self.shared.wake.notify_one();
             }
-            Command::ToggleAuto => {}
+            Command::ChangeCase => {
+                let layout = self.layout_now(q.pending);
+                if let Some(fix) = self.engine.cycle_case(layout) {
+                    self.enqueue(&mut q, fix);
+                } else {
+                    // Слова у каретки нет (щёлкнули, выделили) — меняем регистр выделенного.
+                    q.actions.push_back(Action::Selection(SelectionMode::Case));
+                    self.shared.wake.notify_one();
+                }
+            }
+            Command::ToggleAuto | Command::Layout(_) => {}
         }
     }
 
+    /// Горячая клавиша раскладки: просто включить язык, текст не трогаем.
+    fn switch_layout(&mut self, lang: Lang) {
+        diag!("горячая клавиша раскладки: {lang}");
+        self.assumed = Some((lang, Instant::now()));
+        self.shared.push(Action::SwitchLayout(lang));
+    }
+
+    /// Колёсико мыши: Ctrl+колёсико (масштаб) — не одиночное нажатие Ctrl.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn on_wheel(&mut self) {
+        self.hotkeys.cancel_taps();
+    }
+
     pub fn on_click(&mut self) {
+        self.hotkeys.cancel_taps();
         self.typing = None;
         self.engine.reset();
         self.sys.poke_password();
@@ -484,6 +530,7 @@ impl Controller {
         self.foreground = self.sys.foreground_window();
         self.fullscreen = self.sys.is_fullscreen();
         self.game = self.sys.is_game();
+        self.above_us = self.sys.is_above_us();
         self.assumed = None;
         self.typing = None;
         self.engine.reset_context();
@@ -503,6 +550,9 @@ impl Controller {
         }
         if shell {
             flags.push("оболочка Windows");
+        }
+        if self.above_us {
+            flags.push("от имени администратора");
         }
         diag!(
             "окно: {} [{}]{}",
@@ -528,6 +578,10 @@ impl Controller {
             Some(format!("активное окно на весь экран: {app} (настройка «Не работать в играх»)"))
         } else if self.config.pause_in_fullscreen && self.game {
             Some(format!("игра по папке лаунчера: {app} (настройка «Не работать в играх»)"))
+        } else if self.above_us {
+            Some(format!(
+                "окно запущено от имени администратора: {app} — Windows не пускает туда ввод;                  чтобы работать и в нём, запустите Switcher от имени администратора"
+            ))
         } else if lang.is_none() {
             Some(format!("раскладка окна не русская и не английская: {app}"))
         } else {

@@ -53,7 +53,7 @@ struct Ui {
     controller: Rc<RefCell<Controller>>,
     tray: TrayIcon,
     /// Что сейчас показано на значке: раскладка, включено ли автопереключение, режим.
-    shown: Option<(Option<Lang>, bool, Mode)>,
+    shown: Option<(Option<Lang>, bool, Mode, bool)>,
     taskbar_created: u32,
     /// Плашка с раскладкой у курсора.
     hint: Option<Hint>,
@@ -138,9 +138,13 @@ pub fn run(controller: Rc<RefCell<Controller>>) -> Result<(), String> {
     };
     let on_click = {
         let c = controller.clone();
-        move || {
+        move |click: bool| {
             if let Ok(mut c) = c.try_borrow_mut() {
-                c.on_click();
+                if click {
+                    c.on_click();
+                } else {
+                    c.on_wheel();
+                }
             }
         }
     };
@@ -200,7 +204,7 @@ fn refresh_icon() {
         let Ok(mut guard) = ui.try_borrow_mut() else { return };
         let Some(ui) = guard.as_mut() else { return };
         let Ok(mut c) = ui.controller.try_borrow_mut() else { return };
-        let state = (c.on_timer(), c.active_here(), c.effective_mode());
+        let state = (c.on_timer(), c.active_here(), c.effective_mode(), c.admin_window());
         let auto = c.config().auto;
         let indicator = c.config().indicator;
         let note = c.take_note();
@@ -208,7 +212,7 @@ fn refresh_icon() {
 
         // Смена раскладки (нашей или пользователя): плашка у курсора. Звук — только при наших
         // переключениях, его играет контроллер.
-        let (lang, active, mode) = state;
+        let (lang, active, mode, admin) = state;
         if let (Some(prev), Some(now)) = (ui.last_lang, lang) {
             if prev != now && indicator {
                 if let Some(hint) = &ui.hint {
@@ -231,6 +235,7 @@ fn refresh_icon() {
         let background = if active && lang.is_some() { ORANGE } else { GREY };
         let status = match (auto, active) {
             (false, _) => "выключено",
+            (true, false) if admin => "не работает: окно запущено от администратора",
             (true, false) => "не работает в этом окне",
             (true, true) => "включено",
         };
@@ -310,6 +315,9 @@ fn show_menu(hwnd: HWND) {
             (&cfg.hotkeys.convert_selection, "перевести выделенное"),
             (&cfg.hotkeys.transliterate_selection, "транслитерировать выделенное"),
             (&cfg.hotkeys.toggle_auto, "включить или выключить"),
+            (&cfg.hotkeys.change_case, "сменить регистр"),
+            (&cfg.hotkeys.layout_en, "английская раскладка"),
+            (&cfg.hotkeys.layout_ru, "русская раскладка"),
         ] {
             if !key.is_empty() {
                 AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, wide(&format!("{key} — {what}")).as_ptr());

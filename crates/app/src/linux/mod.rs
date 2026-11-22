@@ -316,6 +316,9 @@ fn tray_view(c: &Controller, lang: Option<Lang>, desktop: &Desktop) -> TrayView 
         (&cfg.hotkeys.convert_selection, "перевести выделенное"),
         (&cfg.hotkeys.transliterate_selection, "транслитерировать выделенное"),
         (&cfg.hotkeys.toggle_auto, "включить или выключить"),
+        (&cfg.hotkeys.change_case, "сменить регистр"),
+        (&cfg.hotkeys.layout_en, "английская раскладка"),
+        (&cfg.hotkeys.layout_ru, "русская раскладка"),
     ]
     .into_iter()
     .filter(|(k, _)| !k.is_empty())

@@ -7,6 +7,9 @@ use std::time::{Duration, Instant};
 
 /// Двойное нажатие модификатора должно уложиться в этот интервал.
 const DOUBLE_TAP: Duration = Duration::from_millis(400);
+/// Одиночное нажатие левого или правого модификатора: отпустить не позже чем через это время.
+/// Дольше — человек держал Ctrl для чего-то другого и передумал.
+const SINGLE_TAP: Duration = Duration::from_millis(500);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Hotkey {
@@ -14,7 +17,14 @@ pub enum Hotkey {
     Chord { ctrl: bool, alt: bool, shift: bool, win: bool, vk: u16 },
     /// Двойное нажатие модификатора без других клавиш.
     Double(Modifier),
+    /// Одиночное нажатие левого или правого Ctrl или Shift без других клавиш (VK стороны).
+    Tap(u16),
 }
+
+/// Модификаторы, которые можно назначить одиночным нажатием: имя в конфиге и VK.
+/// Alt здесь нет: одиночное нажатие Alt открывает меню программы.
+const SIDES: &[(&str, u16)] =
+    &[("LeftCtrl", 0xA2), ("RightCtrl", 0xA3), ("LeftShift", 0xA0), ("RightShift", 0xA1)];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Modifier {
@@ -79,6 +89,9 @@ impl Hotkey {
             "doublealt" => return Some(Hotkey::Double(Modifier::Alt)),
             _ => {}
         }
+        if let Some(&(_, vk)) = SIDES.iter().find(|(n, _)| n.eq_ignore_ascii_case(s)) {
+            return Some(Hotkey::Tap(vk));
+        }
         let (mut ctrl, mut alt, mut shift, mut win) = (false, false, false, false);
         let mut vk = None;
         // «+» как отдельная клавиша не поддерживается — она же разделитель.
@@ -99,6 +112,9 @@ impl fmt::Display for Hotkey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             Hotkey::Double(m) => write!(f, "Double{m:?}"),
+            Hotkey::Tap(vk) => {
+                f.write_str(SIDES.iter().find(|(_, v)| *v == vk).map_or("?", |(n, _)| n))
+            }
             Hotkey::Chord { ctrl, alt, shift, win, vk } => {
                 for (on, name) in [(ctrl, "Ctrl+"), (alt, "Alt+"), (shift, "Shift+"), (win, "Win+")] {
                     if on {
@@ -123,6 +139,12 @@ pub struct HotkeyConfig {
     pub transliterate_selection: String,
     /// Включить или выключить автопереключение.
     pub toggle_auto: String,
+    /// Сменить регистр последнего слова или выделенного: ВЕРХНИЙ → нижний → Как в предложении.
+    pub change_case: String,
+    /// Включить английскую раскладку (без перевода текста).
+    pub layout_en: String,
+    /// Включить русскую раскладку.
+    pub layout_ru: String,
 }
 
 impl Default for HotkeyConfig {
@@ -132,6 +154,9 @@ impl Default for HotkeyConfig {
             convert_selection: "Shift+Pause".into(),
             transliterate_selection: String::new(),
             toggle_auto: String::new(),
+            change_case: String::new(),
+            layout_en: String::new(),
+            layout_ru: String::new(),
         }
     }
 }
@@ -142,6 +167,8 @@ pub enum Command {
     ConvertSelection,
     TransliterateSelection,
     ToggleAuto,
+    ChangeCase,
+    Layout(engine::Lang),
 }
 
 /// Что делать с нажатием.
@@ -164,6 +191,8 @@ pub struct Matcher {
     /// Модификатор, нажатый «чисто» (без других клавиш), и когда отпущен в прошлый раз.
     tap_down: Option<Modifier>,
     last_tap: Option<(Modifier, Instant)>,
+    /// Левый или правый модификатор, нажатый один, и когда.
+    side_down: Option<(u16, Instant)>,
 }
 
 impl Matcher {
@@ -179,6 +208,9 @@ impl Matcher {
             (&cfg.convert_selection, Command::ConvertSelection),
             (&cfg.transliterate_selection, Command::TransliterateSelection),
             (&cfg.toggle_auto, Command::ToggleAuto),
+            (&cfg.change_case, Command::ChangeCase),
+            (&cfg.layout_en, Command::Layout(engine::Lang::En)),
+            (&cfg.layout_ru, Command::Layout(engine::Lang::Ru)),
         ]
         .into_iter()
         .filter_map(|(s, c)| Hotkey::parse(s).map(|h| (h, c)))
@@ -201,11 +233,24 @@ impl Matcher {
             if self.tap_down != Some(m) {
                 self.tap_down = Some(m);
             }
+            // Второй модификатор (Ctrl+Shift) — это уже сочетание, а не одиночное нажатие.
+            let alone = match m {
+                Modifier::Ctrl => !(alt || shift || win),
+                Modifier::Shift => !(ctrl || alt || win),
+                Modifier::Alt => false,
+            };
+            self.side_down = match self.side_down {
+                // Автоповтор зажатой клавиши.
+                Some((held, at)) if held == vk => Some((held, at)),
+                None if alone => Some((vk, Instant::now())),
+                _ => None,
+            };
             return Hit::None;
         }
-        // Любая другая клавиша — двойного нажатия уже не будет.
+        // Любая другая клавиша — двойного и одиночного нажатия уже не будет.
         self.tap_down = None;
         self.last_tap = None;
+        self.side_down = None;
 
         let pressed = Hotkey::Chord { ctrl, alt, shift, win, vk };
         match self.bindings.iter().find(|(h, _)| *h == pressed) {
@@ -217,7 +262,24 @@ impl Matcher {
         }
     }
 
+    /// Мышь (щелчок или колёсико) при зажатом модификаторе: Ctrl+щелчок, Ctrl+колёсико — не нажатие.
+    pub fn cancel_taps(&mut self) {
+        self.tap_down = None;
+        self.last_tap = None;
+        self.side_down = None;
+    }
+
     fn on_modifier_up(&mut self, vk: u16) -> Hit {
+        if let Some((held, at)) = self.side_down.take() {
+            if held == vk && at.elapsed() <= SINGLE_TAP {
+                if let Some(&(_, command)) = self.bindings.iter().find(|(h, _)| *h == Hotkey::Tap(vk)) {
+                    // Двойное нажатие этого модификатора уже не считаем.
+                    self.tap_down = None;
+                    self.last_tap = None;
+                    return Hit::Command { command, swallow: false };
+                }
+            }
+        }
         let Some(m) = Modifier::of(vk) else { return Hit::None };
         if self.tap_down.take() != Some(m) {
             return Hit::None;
@@ -250,6 +312,39 @@ mod tests {
         assert!(Hotkey::parse("").is_none());
         assert!(Hotkey::parse("Ctrl+Nonsense").is_none());
         assert!(Hotkey::parse("Ctrl+Shift").is_none());
+        assert_eq!(Hotkey::parse("rightctrl"), Some(Hotkey::Tap(0xA3)));
+        assert_eq!(Hotkey::parse("LeftShift").unwrap().to_string(), "LeftShift");
+    }
+
+    #[test]
+    fn single_tap_of_one_side() {
+        let cfg = HotkeyConfig { layout_en: "LeftCtrl".into(), layout_ru: "RightCtrl".into(), ..Default::default() };
+        let mut m = Matcher::new(&cfg);
+        // Левый Ctrl один — английская; правый — русская.
+        m.on_event(0xA2, false, true, false, false, false);
+        assert_eq!(
+            m.on_event(0xA2, true, false, false, false, false),
+            Hit::Command { command: Command::Layout(engine::Lang::En), swallow: false }
+        );
+        m.on_event(0xA3, false, true, false, false, false);
+        assert_eq!(
+            m.on_event(0xA3, true, false, false, false, false),
+            Hit::Command { command: Command::Layout(engine::Lang::Ru), swallow: false }
+        );
+        // Ctrl+C — не нажатие Ctrl.
+        m.on_event(0xA2, false, true, false, false, false);
+        m.on_event(0x43, false, true, false, false, false);
+        m.on_event(0x43, true, true, false, false, false);
+        assert_eq!(m.on_event(0xA2, true, false, false, false, false), Hit::None);
+        // Ctrl+Shift — тоже.
+        m.on_event(0xA0, false, false, false, true, false);
+        m.on_event(0xA2, false, true, false, true, false);
+        assert_eq!(m.on_event(0xA2, true, false, false, true, false), Hit::None);
+        m.on_event(0xA0, true, false, false, false, false);
+        // Ctrl+колёсико.
+        m.on_event(0xA2, false, true, false, false, false);
+        m.cancel_taps();
+        assert_eq!(m.on_event(0xA2, true, false, false, false, false), Hit::None);
     }
 
     #[test]
