@@ -196,6 +196,8 @@ pub struct Controller {
     game: bool,
     /// Активное окно запущено от имени администратора, а мы — нет: работать там не можем.
     above_us: bool,
+    /// Нажали горячую клавишу в окне администратора — показать предупреждение у значка.
+    admin_warning: bool,
     /// Пометка для плашки у курсора («выучено») и когда она появилась.
     note: Option<(&'static str, Instant)>,
     /// Когда набрана последняя буква незаконченного слова (для перевода по паузе в наборе).
@@ -235,6 +237,7 @@ impl Controller {
             fullscreen: false,
             game: false,
             above_us: false,
+            admin_warning: false,
             files: Files {
                 config: WatchedFile::new(&config::config_path()),
                 learned: WatchedFile::new(&config::learned_path()),
@@ -348,6 +351,18 @@ impl Controller {
         self.config.pause_in_fullscreen && (self.fullscreen || self.game)
     }
 
+    /// Горячая клавиша в окне администратора: попросить показать предупреждение у значка.
+    pub fn warn_admin(&mut self) {
+        diag!("горячая клавиша в окне администратора — показываю предупреждение");
+        self.admin_warning = true;
+    }
+
+    /// Надо ли показать предупреждение (и сбросить просьбу).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn take_admin_warning(&mut self) -> bool {
+        std::mem::take(&mut self.admin_warning)
+    }
+
     /// Активное окно запущено от имени администратора, а мы — нет (для подсказки у значка).
     #[cfg_attr(not(windows), allow(dead_code))]
     pub fn admin_window(&self) -> bool {
@@ -384,8 +399,11 @@ impl Controller {
             Hit::Command { command, swallow } => {
                 // Включать и выключать можно везде, раскладку менять — везде, кроме игр
                 // (там Ctrl — это присесть); переводить — только там, где мы работаем.
+                // В окно администратора Windows ни ввод, ни смену раскладки не пустит — предупреждаем.
                 if command == Command::ToggleAuto {
                     self.update_config(|cfg| cfg.auto = !cfg.auto);
+                } else if self.above_us {
+                    self.warn_admin();
                 } else if let Command::Layout(lang) = command {
                     if !self.paused_for_fullscreen() {
                         self.switch_layout(lang);
