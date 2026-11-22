@@ -30,6 +30,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 const WM_TRAY: u32 = WM_APP + 1;
 const TIMER_ID: usize = 1;
 const TIMER_MS: u32 = 150;
+/// Опрос клавиш, пока активно окно администратора: чаще, чтобы не пропустить короткое нажатие.
+const ADMIN_TIMER_ID: usize = 2;
+const ADMIN_TIMER_MS: u32 = 40;
 
 const CMD_AUTO: usize = 1;
 const CMD_EXIT: usize = 2;
@@ -61,6 +64,29 @@ struct Ui {
     last_lang: Option<Lang>,
     /// Горячие клавиши зарегистрированы в системе (пока активно окно администратора).
     admin_hotkeys: bool,
+    /// Сочетания, которые опрашиваем, пока активно окно администратора, и зажаты ли они.
+    admin_chords: Vec<(Chord, bool)>,
+}
+
+/// Сочетание для опроса клавиатуры: модификаторы и клавиша.
+#[derive(Clone, Copy)]
+struct Chord {
+    ctrl: bool,
+    alt: bool,
+    shift: bool,
+    win: bool,
+    vk: u16,
+}
+
+impl Chord {
+    fn pressed(&self) -> bool {
+        let down = |vk: u16| super::key_down(vk).unwrap_or(false);
+        down(self.vk)
+            && down(0x11) == self.ctrl
+            && down(0x12) == self.alt
+            && down(0x10) == self.shift
+            && (down(0x5B) || down(0x5C)) == self.win
+    }
 }
 
 /// Окно, которому контроллер шлёт просьбы проиграть звук (из процедуры хука звук не играем).
@@ -124,6 +150,7 @@ pub fn run(controller: Rc<RefCell<Controller>>) -> Result<(), String> {
             hint: Hint::create(),
             last_lang: None,
             admin_hotkeys: false,
+            admin_chords: Vec::new(),
         })
     });
     refresh_icon();
@@ -236,9 +263,12 @@ fn refresh_icon() {
         if admin != ui.admin_hotkeys {
             let hwnd = UI_HWND.load(Ordering::Relaxed);
             if admin {
-                register_admin_hotkeys(hwnd, &hotkeys);
+                ui.admin_chords = register_admin_hotkeys(hwnd, &hotkeys).into_iter().map(|c| (c, true)).collect();
+                unsafe { SetTimer(hwnd, ADMIN_TIMER_ID, ADMIN_TIMER_MS, None) };
             } else {
                 unregister_admin_hotkeys(hwnd);
+                ui.admin_chords.clear();
+                unsafe { windows_sys::Win32::UI::WindowsAndMessaging::KillTimer(hwnd, ADMIN_TIMER_ID) };
             }
             ui.admin_hotkeys = admin;
         }
@@ -427,7 +457,8 @@ pub fn open_folder(dir: &std::path::Path) {
 /// Сколько всего горячих клавиш может быть зарегистрировано (по числу команд).
 const MAX_ADMIN_HOTKEYS: i32 = 16;
 
-fn register_admin_hotkeys(hwnd: HWND, cfg: &crate::hotkeys::HotkeyConfig) {
+/// Регистрирует сочетания в системе и возвращает те, что надо ещё и опрашивать (всё, кроме «вкл/выкл»).
+fn register_admin_hotkeys(hwnd: HWND, cfg: &crate::hotkeys::HotkeyConfig) -> Vec<Chord> {
     use crate::hotkeys::Hotkey;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         RegisterHotKey, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN,
@@ -442,6 +473,8 @@ fn register_admin_hotkeys(hwnd: HWND, cfg: &crate::hotkeys::HotkeyConfig) {
         (&cfg.layout_ru, false),
     ];
     let mut next = HOTKEY_OTHER;
+    let mut chords = Vec::new();
+    let (mut ok, mut total) = (0, 0);
     for (text, toggle) in keys {
         // Двойные и одиночные нажатия модификаторов системе не объяснить — только сочетания.
         let Some(Hotkey::Chord { ctrl, alt, shift, win, vk }) = Hotkey::parse(text) else { continue };
@@ -454,7 +487,35 @@ fn register_admin_hotkeys(hwnd: HWND, cfg: &crate::hotkeys::HotkeyConfig) {
         if !toggle {
             next += 1;
         }
-        unsafe { RegisterHotKey(hwnd, id, mods, u32::from(vk)) };
+        total += 1;
+        if unsafe { RegisterHotKey(hwnd, id, mods, u32::from(vk)) } != 0 {
+            ok += 1;
+        }
+        if !toggle {
+            chords.push(Chord { ctrl, alt, shift, win, vk });
+        }
+    }
+    diag!("окно администратора: горячих клавиш зарегистрировано {ok} из {total}, опрашиваю {}", chords.len());
+    chords
+}
+
+/// Опрос клавиатуры, пока активно окно администратора: если сочетание только что нажали —
+/// показываем предупреждение.
+fn poll_admin_chords() {
+    let hit = UI.with(|ui| {
+        let Ok(mut guard) = ui.try_borrow_mut() else { return false };
+        let Some(ui) = guard.as_mut() else { return false };
+        let mut hit = false;
+        for (chord, was_down) in ui.admin_chords.iter_mut() {
+            let down = chord.pressed();
+            hit |= down && !*was_down;
+            *was_down = down;
+        }
+        hit
+    });
+    if hit {
+        diag!("горячая клавиша в окне администратора (опрос клавиш) — показываю предупреждение");
+        show_admin_warning();
     }
 }
 
@@ -491,9 +552,13 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             if wparam as i32 == HOTKEY_TOGGLE {
                 toggle_auto();
             } else {
-                diag!("горячая клавиша в окне администратора — показываю предупреждение");
+                diag!("горячая клавиша в окне администратора (система) — показываю предупреждение");
                 show_admin_warning();
             }
+            0
+        }
+        WM_TIMER if wparam == ADMIN_TIMER_ID => {
+            poll_admin_chords();
             0
         }
         WM_SOUND => {
