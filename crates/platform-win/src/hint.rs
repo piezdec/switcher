@@ -1,6 +1,5 @@
 //! Плашка с названием раскладки у текстового курсора: появляется, держится и плавно гаснет.
 //! Окно полупрозрачное, поверх всех, не забирает фокус и пропускает щелчки мыши насквозь.
-//! Та же плашка, только тёмная и подольше, — предупреждение над значком в трее.
 
 use crate::wide;
 use std::cell::RefCell;
@@ -26,8 +25,6 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 const TIMER_ID: usize = 1;
 const TICK_MS: u32 = 30;
 const HOLD: Duration = Duration::from_millis(700);
-/// Предупреждение держится дольше: его надо успеть прочитать.
-const WARN_HOLD: Duration = Duration::from_millis(1600);
 const FADE: Duration = Duration::from_millis(450);
 const MAX_ALPHA: f32 = 235.0;
 
@@ -35,33 +32,14 @@ const MAX_ALPHA: f32 = 235.0;
 const FLASH: u32 = 0xFF_E0_80;
 const ORANGE: u32 = 0xF2_8C_28;
 const TEXT: u32 = 0x00_00_00;
-/// Предупреждение: тёмное с белым текстом, вспышка чуть светлее.
-const WARN_FLASH: u32 = 0x5A_5A_5A;
-const WARN_BG: u32 = 0x2B_2B_2B;
-/// Рамка предупреждения — чтобы не сливалось с тёмной панелью задач.
-const WARN_BORDER: u32 = 0xF2_8C_28;
-const WARN_TEXT: u32 = 0xFF_FF_FF;
 
 struct State {
     text: String,
     shown: Option<Instant>,
-    /// Предупреждение (тёмное, держится дольше), а не раскладка.
-    warn: bool,
-}
-
-impl State {
-    fn hold(&self) -> Duration {
-        if self.warn {
-            WARN_HOLD
-        } else {
-            HOLD
-        }
-    }
 }
 
 thread_local! {
-    static STATE: RefCell<State> =
-        const { RefCell::new(State { text: String::new(), shown: None, warn: false }) };
+    static STATE: RefCell<State> = const { RefCell::new(State { text: String::new(), shown: None }) };
 }
 
 pub struct Hint {
@@ -114,35 +92,14 @@ impl Hint {
 
     /// Показывает плашку с текстом у текстового курсора активного окна (или у указателя мыши).
     pub fn show(&self, text: &str) {
-        let (w, h) = unsafe { measure(self.hwnd, text) };
-        let (x, y) = unsafe { anchor() };
-        self.show_at(text, false, (x, y, w, h));
-    }
-
-    /// Тёмное предупреждение над прямоугольником `above` (значком в трее), в пределах экрана.
-    pub fn warn_above(&self, text: &str, above: RECT) {
-        use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromRect, MONITORINFO, MONITOR_DEFAULTTONEAREST};
-        let (w, h) = unsafe { measure(self.hwnd, text) };
-        let work = unsafe {
-            let mut mi: MONITORINFO = std::mem::zeroed();
-            mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
-            GetMonitorInfoW(MonitorFromRect(&above, MONITOR_DEFAULTTONEAREST), &mut mi);
-            mi.rcWork
-        };
-        let gap = scale(8);
-        let x = ((above.left + above.right) / 2 - w / 2).clamp(work.left + gap, (work.right - w - gap).max(work.left));
-        let y = (above.top - h - gap).clamp(work.top + gap, (work.bottom - h - gap).max(work.top));
-        self.show_at(text, true, (x, y, w, h));
-    }
-
-    fn show_at(&self, text: &str, warn: bool, (x, y, w, h): (i32, i32, i32, i32)) {
         STATE.with(|s| {
             let mut s = s.borrow_mut();
             s.text = text.to_string();
             s.shown = Some(Instant::now());
-            s.warn = warn;
         });
         unsafe {
+            let (w, h) = measure(self.hwnd, text);
+            let (x, y) = anchor();
             SetWindowPos(self.hwnd, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE);
             let radius = scale(8);
             SetWindowRgn(self.hwnd, CreateRoundRectRgn(0, 0, w + 1, h + 1, radius, radius), 1);
@@ -208,40 +165,22 @@ unsafe fn anchor() -> (i32, i32) {
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         WM_PAINT => {
-            let (text, age, warn) = STATE.with(|s| {
+            let (text, age) = STATE.with(|s| {
                 let s = s.borrow();
-                (s.text.clone(), s.shown.map_or(s.hold(), |t| t.elapsed()), s.warn)
+                (s.text.clone(), s.shown.map_or(HOLD, |t| t.elapsed()))
             });
             let mut ps: PAINTSTRUCT = std::mem::zeroed();
             let dc = BeginPaint(hwnd, &mut ps);
             let mut rect = ps.rcPaint;
             // Первые 150 мс — вспышка, потом основной цвет.
-            let flash = age < Duration::from_millis(150);
-            let bg = match (warn, flash) {
-                (false, true) => FLASH,
-                (false, false) => ORANGE,
-                (true, true) => WARN_FLASH,
-                (true, false) => WARN_BG,
-            };
+            let bg = if age < Duration::from_millis(150) { FLASH } else { ORANGE };
             let brush = CreateSolidBrush(colorref(bg));
             FillRect(dc, &rect, brush);
             DeleteObject(brush);
-            if warn {
-                use windows_sys::Win32::Graphics::Gdi::FrameRgn;
-                let mut client = RECT { left: 0, top: 0, right: 0, bottom: 0 };
-                windows_sys::Win32::UI::WindowsAndMessaging::GetClientRect(hwnd, &mut client);
-                let radius = scale(8);
-                let rgn = CreateRoundRectRgn(0, 0, client.right, client.bottom, radius, radius);
-                let border = CreateSolidBrush(colorref(WARN_BORDER));
-                let width = scale(1).max(1);
-                FrameRgn(dc, rgn, border, width, width);
-                DeleteObject(border);
-                DeleteObject(rgn);
-            }
             let f = font();
             let old = SelectObject(dc, f);
             SetBkMode(dc, TRANSPARENT as i32);
-            SetTextColor(dc, colorref(if warn { WARN_TEXT } else { TEXT }));
+            SetTextColor(dc, colorref(TEXT));
             let mut w: Vec<u16> = text.encode_utf16().collect();
             windows_sys::Win32::UI::WindowsAndMessaging::GetClientRect(hwnd, &mut rect);
             DrawTextW(dc, w.as_mut_ptr(), w.len() as i32, &mut rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
@@ -251,21 +190,18 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             0
         }
         WM_TIMER if wparam == TIMER_ID => {
-            let (age, hold) = STATE.with(|s| {
-                let s = s.borrow();
-                (s.shown.map_or(s.hold() + FADE, |t| t.elapsed()), s.hold())
-            });
-            if age >= hold + FADE {
+            let age = STATE.with(|s| s.borrow().shown.map_or(HOLD + FADE, |t| t.elapsed()));
+            if age >= HOLD + FADE {
                 KillTimer(hwnd, TIMER_ID);
                 ShowWindow(hwnd, SW_HIDE);
             } else {
                 if age > Duration::from_millis(150) && age < Duration::from_millis(150 + TICK_MS as u64 * 2) {
                     InvalidateRect(hwnd, null(), 1); // сменить вспышку на основной цвет
                 }
-                let alpha = if age <= hold {
+                let alpha = if age <= HOLD {
                     MAX_ALPHA
                 } else {
-                    MAX_ALPHA * (1.0 - (age - hold).as_secs_f32() / FADE.as_secs_f32())
+                    MAX_ALPHA * (1.0 - (age - HOLD).as_secs_f32() / FADE.as_secs_f32())
                 };
                 SetLayeredWindowAttributes(hwnd, 0, alpha.max(0.0) as u8, LWA_ALPHA);
             }

@@ -110,20 +110,6 @@ impl TrayIcon {
         unsafe { Shell_NotifyIconW(NIM_ADD, &self.data) != 0 }
     }
 
-    /// Где значок на экране. Если он спрятан в скрытых значках — `None`.
-    pub fn rect(&self) -> Option<RECT> {
-        use windows_sys::Win32::UI::Shell::{Shell_NotifyIconGetRect, NOTIFYICONIDENTIFIER};
-        let id = NOTIFYICONIDENTIFIER {
-            cbSize: size_of::<NOTIFYICONIDENTIFIER>() as u32,
-            hWnd: self.data.hWnd,
-            uID: self.data.uID,
-            guidItem: unsafe { zeroed() },
-        };
-        let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
-        let ok = unsafe { Shell_NotifyIconGetRect(&id, &mut r) } == 0;
-        (ok && r.right > r.left).then_some(r)
-    }
-
     /// Меняет картинку и подсказку. Старая картинка уничтожается.
     pub fn update(&mut self, icon: HICON, tip: &str) {
         let old = self.data.hIcon;

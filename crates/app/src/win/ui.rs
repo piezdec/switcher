@@ -30,9 +30,6 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 const WM_TRAY: u32 = WM_APP + 1;
 const TIMER_ID: usize = 1;
 const TIMER_MS: u32 = 150;
-/// Опрос клавиш, пока активно окно администратора: чаще, чтобы не пропустить короткое нажатие.
-const ADMIN_TIMER_ID: usize = 2;
-const ADMIN_TIMER_MS: u32 = 40;
 
 const CMD_AUTO: usize = 1;
 const CMD_EXIT: usize = 2;
@@ -62,44 +59,12 @@ struct Ui {
     hint: Option<Hint>,
     /// Последняя известная раскладка — чтобы заметить смену.
     last_lang: Option<Lang>,
-    /// Горячие клавиши зарегистрированы в системе (пока активно окно администратора).
-    admin_hotkeys: bool,
-    /// Сочетания, которые опрашиваем, пока активно окно администратора, и зажаты ли они.
-    admin_chords: Vec<(Chord, bool)>,
-}
-
-/// Сочетание для опроса клавиатуры: модификаторы и клавиша.
-#[derive(Clone, Copy)]
-struct Chord {
-    ctrl: bool,
-    alt: bool,
-    shift: bool,
-    win: bool,
-    vk: u16,
-}
-
-impl Chord {
-    fn pressed(&self) -> bool {
-        let down = |vk: u16| super::key_down(vk).unwrap_or(false);
-        down(self.vk)
-            && down(0x11) == self.ctrl
-            && down(0x12) == self.alt
-            && down(0x10) == self.shift
-            && (down(0x5B) || down(0x5C)) == self.win
-    }
 }
 
 /// Окно, которому контроллер шлёт просьбы проиграть звук (из процедуры хука звук не играем).
 static UI_HWND: AtomicPtr<core::ffi::c_void> = AtomicPtr::new(null_mut());
 
 const WM_SOUND: u32 = WM_APP + 2;
-/// Показать предупреждение «окно от администратора» над значком.
-const WM_ADMIN_WARNING: u32 = WM_APP + 3;
-
-/// Горячая клавиша «вкл/выкл» среди зарегистрированных на время окна администратора.
-const HOTKEY_TOGGLE: i32 = 1;
-const HOTKEY_OTHER: i32 = 2;
-const ADMIN_WARNING: &str = "Окно от администратора — Switcher здесь не работает";
 
 /// Просит главное окно проиграть звук. Дёшево: только отправка сообщения своему же потоку.
 pub fn post_sound(s: Sound) {
@@ -149,8 +114,6 @@ pub fn run(controller: Rc<RefCell<Controller>>) -> Result<(), String> {
             taskbar_created,
             hint: Hint::create(),
             last_lang: None,
-            admin_hotkeys: false,
-            admin_chords: Vec::new(),
         })
     });
     refresh_icon();
@@ -167,15 +130,7 @@ pub fn run(controller: Rc<RefCell<Controller>>) -> Result<(), String> {
                 up: ev.up,
                 raw: RawKey { code: ev.scan, extended: ev.extended, repeat: false },
             };
-            let verdict = c.try_borrow_mut().map(|mut c| {
-                let verdict = c.on_key(&e);
-                if c.take_admin_warning() {
-                    let hwnd = UI_HWND.load(Ordering::Relaxed);
-                    unsafe { PostMessageW(hwnd, WM_ADMIN_WARNING, 0, 0) };
-                }
-                verdict
-            });
-            match verdict {
+            match c.try_borrow_mut().map(|mut c| c.on_key(&e)) {
                 Ok(SysVerdict::Swallow) => Verdict::Swallow,
                 _ => Verdict::Pass,
             }
@@ -253,25 +208,7 @@ fn refresh_icon() {
         let auto = c.config().auto;
         let indicator = c.config().indicator;
         let note = c.take_note();
-        let hotkeys = c.config().hotkeys.clone();
         drop(c);
-
-        // Окно администратора: наш перехват клавиатуры его нажатий не видит, поэтому на это время
-        // регистрируем горячие клавиши в системе — чтобы по Pause хотя бы показать, почему
-        // ничего не происходит.
-        let admin = state.3;
-        if admin != ui.admin_hotkeys {
-            let hwnd = UI_HWND.load(Ordering::Relaxed);
-            if admin {
-                ui.admin_chords = register_admin_hotkeys(hwnd, &hotkeys).into_iter().map(|c| (c, true)).collect();
-                unsafe { SetTimer(hwnd, ADMIN_TIMER_ID, ADMIN_TIMER_MS, None) };
-            } else {
-                unregister_admin_hotkeys(hwnd);
-                ui.admin_chords.clear();
-                unsafe { windows_sys::Win32::UI::WindowsAndMessaging::KillTimer(hwnd, ADMIN_TIMER_ID) };
-            }
-            ui.admin_hotkeys = admin;
-        }
 
         // Смена раскладки (нашей или пользователя): плашка у курсора. Звук — только при наших
         // переключениях, его играет контроллер.
@@ -454,113 +391,8 @@ pub fn open_folder(dir: &std::path::Path) {
     }
 }
 
-/// Сколько всего горячих клавиш может быть зарегистрировано (по числу команд).
-const MAX_ADMIN_HOTKEYS: i32 = 16;
-
-/// Регистрирует сочетания в системе и возвращает те, что надо ещё и опрашивать (всё, кроме «вкл/выкл»).
-fn register_admin_hotkeys(hwnd: HWND, cfg: &crate::hotkeys::HotkeyConfig) -> Vec<Chord> {
-    use crate::hotkeys::Hotkey;
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        RegisterHotKey, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN,
-    };
-    let keys = [
-        (&cfg.toggle_auto, true),
-        (&cfg.convert_word, false),
-        (&cfg.convert_selection, false),
-        (&cfg.transliterate_selection, false),
-        (&cfg.change_case, false),
-        (&cfg.layout_en, false),
-        (&cfg.layout_ru, false),
-    ];
-    let mut next = HOTKEY_OTHER;
-    let mut chords = Vec::new();
-    let (mut ok, mut total) = (0, 0);
-    for (text, toggle) in keys {
-        // Двойные и одиночные нажатия модификаторов системе не объяснить — только сочетания.
-        let Some(Hotkey::Chord { ctrl, alt, shift, win, vk }) = Hotkey::parse(text) else { continue };
-        let mods = MOD_NOREPEAT
-            | if ctrl { MOD_CONTROL } else { 0 }
-            | if alt { MOD_ALT } else { 0 }
-            | if shift { MOD_SHIFT } else { 0 }
-            | if win { MOD_WIN } else { 0 };
-        let id = if toggle { HOTKEY_TOGGLE } else { next };
-        if !toggle {
-            next += 1;
-        }
-        total += 1;
-        if unsafe { RegisterHotKey(hwnd, id, mods, u32::from(vk)) } != 0 {
-            ok += 1;
-        }
-        if !toggle {
-            chords.push(Chord { ctrl, alt, shift, win, vk });
-        }
-    }
-    diag!("окно администратора: горячих клавиш зарегистрировано {ok} из {total}, опрашиваю {}", chords.len());
-    chords
-}
-
-/// Опрос клавиатуры, пока активно окно администратора: если сочетание только что нажали —
-/// показываем предупреждение.
-fn poll_admin_chords() {
-    let hit = UI.with(|ui| {
-        let Ok(mut guard) = ui.try_borrow_mut() else { return false };
-        let Some(ui) = guard.as_mut() else { return false };
-        let mut hit = false;
-        for (chord, was_down) in ui.admin_chords.iter_mut() {
-            let down = chord.pressed();
-            hit |= down && !*was_down;
-            *was_down = down;
-        }
-        hit
-    });
-    if hit {
-        diag!("горячая клавиша в окне администратора (опрос клавиш) — показываю предупреждение");
-        show_admin_warning();
-    }
-}
-
-fn unregister_admin_hotkeys(hwnd: HWND) {
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::UnregisterHotKey;
-    for id in HOTKEY_TOGGLE..MAX_ADMIN_HOTKEYS {
-        unsafe { UnregisterHotKey(hwnd, id) };
-    }
-}
-
-/// Тёмная плашка над значком в трее (или над правым краем панели задач, если значок скрыт).
-fn show_admin_warning() {
-    UI.with(|ui| {
-        let Ok(guard) = ui.try_borrow() else { return };
-        let Some(ui) = guard.as_ref() else { return };
-        let Some(hint) = &ui.hint else { return };
-        let rect = ui.tray.rect().unwrap_or_else(|| unsafe {
-            use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
-            let (w, h) = (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
-            windows_sys::Win32::Foundation::RECT { left: w - 120, top: h - 40, right: w - 80, bottom: h }
-        });
-        hint.warn_above(ADMIN_WARNING, rect);
-    });
-}
-
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    use windows_sys::Win32::UI::WindowsAndMessaging::WM_HOTKEY;
     match msg {
-        WM_ADMIN_WARNING => {
-            show_admin_warning();
-            0
-        }
-        WM_HOTKEY => {
-            if wparam as i32 == HOTKEY_TOGGLE {
-                toggle_auto();
-            } else {
-                diag!("горячая клавиша в окне администратора (система) — показываю предупреждение");
-                show_admin_warning();
-            }
-            0
-        }
-        WM_TIMER if wparam == ADMIN_TIMER_ID => {
-            poll_admin_chords();
-            0
-        }
         WM_SOUND => {
             let s = match wparam {
                 0 => Sound::ToRussian,
